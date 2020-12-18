@@ -1,155 +1,196 @@
-import time
-from concurrent import futures
+"""Expose main Reachy ROS services/topics through gRPC allowing remote client SDK."""
 
-from google.protobuf.wrappers_pb2 import FloatValue
+import time
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Iterator
+
+from google.protobuf.empty_pb2 import Empty
+from google.protobuf.timestamp_pb2 import Timestamp
 
 import grpc
 
 import rclpy
 from rclpy.node import Node
 
-from reachy_msgs.srv import SetCompliant
+from reachy_msgs.msg import JointTemperature
+from reachy_msgs.srv import GetJointsFullState, SetCompliant
 
-from reachy_sdk_api import (
-    joint_command_pb2, joint_command_pb2_grpc,
-    joint_state_pb2, joint_state_pb2_grpc,
-)
-from reachy_sdk_api.joint_state_pb2 import JointStateField
+from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
+from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 
-from sensor_msgs.msg import JointState
+from sensor_msgs import msg
+
+from .utils import jointstate_pb_from_request
 
 
-class ReachySDKServer(Node):
-    def __init__(self, timeout_sec: float = 5) -> None:
-        super().__init__(node_name='reachy_sdk_server')
+class ReachySDKServer(Node,
+                      joint_state_pb2_grpc.JointStateServiceServicer,
+                      joint_command_pb2_grpc.JointCommandServiceServicer):
+    """Reachy SDK server node."""
+
+    def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
+        """Set up the node.
+
+        Subscribe to /joint_state, /joint_temp.
+        Publish new command on /joint_goal or concerned services.
+
+        """
+        super().__init__(node_name=node_name)
+
+        self.timeout_sec = timeout_sec
+        self.pub_period = 1 / pub_frequency
 
         self.clock = self.get_clock()
+        self.logger = self.get_logger()
 
-        self.joint_state_subscription = self.create_subscription(
-            msg_type=JointState,
-            topic='joint_states',
-            callback=self.on_joint_states,
-            qos_profile=1,
-        )
+        self.joints: Dict[str, Dict[str, float]] = OrderedDict()
+        self.setup()
 
-        self.joint_goals_publisher = self.create_publisher(
-            msg_type=JointState,
-            topic='joint_goals',
-            qos_profile=5,
-        )
-
+        self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetCompliant, 'set_compliant')
-        self.compliant_client.wait_for_service(timeout_sec=timeout_sec)
 
-        self.joints = {}
+        self.joint_states_sub = self.create_subscription(
+            msg_type=msg.JointState, topic='joint_states',
+            callback=self.on_joint_states, qos_profile=5,
+        )
+        self.joint_temperatures_sub = self.create_subscription(
+            msg_type=JointTemperature, topic='joint_temperatures',
+            callback=self.on_joint_temperatures, qos_profile=5,
+        )
 
-    def on_joint_states(self, joint_state: JointState) -> None:
-        for name, pos in zip(joint_state.name, joint_state.position):
-            self.joints[name] = {'name': name, 'position': pos}
+        self.joint_goals_pub = self.create_publisher(
+            msg_type=msg.JointState, topic='joint_goals', qos_profile=5,
+        )
+        self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
+        self.logger.info('SDK ready to be served!')
 
-    def get_joint_state(self, joint_name: str):
-        return self.joints[joint_name]
+    def setup(self) -> None:
+        """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
+        self.logger.info('Getting all joints initial configuration...')
 
-    def set_target_position(self, joint_name: str, target_position: float):
-        joint_goals = JointState()
+        joint_fullstate_client = self.create_client(
+            srv_type=GetJointsFullState, srv_name='get_joint_full_state',
+        )
+        joint_fullstate_client.wait_for_service(timeout_sec=self.timeout_sec)
+        fut = joint_fullstate_client.call_async(GetJointsFullState.Request())
+        rclpy.spin_until_future_complete(self, fut)
+        full_state_resp = fut.result()
+
+        for i, name in enumerate(full_state_resp.name):
+            self.joints[name] = {
+                'name': name,
+                'present_position': full_state_resp.present_position[i],
+                'present_speed': full_state_resp.present_speed[i],
+                'present_load': full_state_resp.present_load[i],
+                'temperature': full_state_resp.temperature[i],
+                'compliant': full_state_resp.compliant[i],
+                'goal_position': full_state_resp.goal_position[i],
+                'speed_limit': full_state_resp.speed_limit[i],
+                'torque_limit': full_state_resp.torque_limit[i],
+            }
+
+    def on_joint_states(self, joint_state: msg.JointState) -> None:
+        """Update joints position/velocity/effort on joint_state msg."""
+        for name, position, velocity, effort in zip(joint_state.name, joint_state.position,
+                                                    joint_state.velocity, joint_state.effort):
+            self.joints[name]['present_position'] = position
+            self.joints[name]['present_speed'] = velocity
+            self.joints[name]['present_load'] = effort
+
+    def on_joint_temperatures(self, joint_temperature: JointTemperature) -> None:
+        """Update joints temperature on joint_temperature msg."""
+        for name, temp in zip(joint_temperature.name, joint_temperature.temperature):
+            self.joints[name]['temperature'] = temp.temperature
+
+    def on_joint_goals_publish(self) -> None:
+        """Publish position/velocity/effort on joint_goals.
+
+        Automatically called at a predefined frequency.
+        """
+        # TODO: only publish when and what's needed?
+        joint_goals = msg.JointState()
         joint_goals.header.stamp = self.clock.now().to_msg()
-        joint_goals.name = [joint_name]
-        joint_goals.position = [target_position]
-        self.joint_goals_publisher.publish(joint_goals)
+        joint_goals.name = self.joints.keys()
+        joint_goals.position = [j['goal_position'] for j in self.joints.values()]
+        joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
+        joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
+        self.joint_goals_pub.publish(joint_goals)
 
-    def set_compliant(self, joint_name: str, compliant: bool) -> bool:
-        request = SetCompliant.Request()
-        request.name = [joint_name]
-        request.compliant = [compliant]
-        future = self.compliant_client.call_async(request)
-        while not future.done():
-            time.sleep(0.01)
-        return future.result().success
+    def handle_command(self, command: jc_pb.JointCommand) -> bool:
+        """Handle new received command.
 
+        Does not handle the async response at the moment.
+        """
+        if command.HasField('goal_position'):
+            self.joints[command.name]['goal_position'] = command.goal_position.value
 
-class JointStateProvider(joint_state_pb2_grpc.JointStateServiceServicer):
-    STREAM_FREQ = 100
+        if command.HasField('compliant'):
+            request = SetCompliant.Request()
+            request.name = [command.name]
+            request.compliant = [command.compliant.value]
+            future = self.compliant_client.call_async(request)
+            # TODO: how to properly wait for the result and handles it?
 
-    def __init__(self, sdk_server: ReachySDKServer) -> None:
-        super().__init__()
-        self.sdk_server = sdk_server
+        return True
 
-    def get_joint_state(self, name: str, requested_fields) -> joint_state_pb2.JointState:
-        joint = self.sdk_server.get_joint_state(name)
+    # Handle GRPCs
+    def GetAllJointNames(self, request: Empty, context) -> js_pb.JointNames:
+        """Get all the joints name."""
+        return js_pb.JointNames(names=self.joints.keys())
 
-        params = {}
+    def GetJointState(self, request: js_pb.JointRequest, context) -> js_pb.JointState:
+        """Get the requested joint state."""
+        joint = self.joints[request.name]
+        fields = request.requested_fields
 
-        for field in requested_fields:
-            if field == JointStateField.NAME:
-                params['name'] = joint['name']
-            elif field == JointStateField.POSITION:
-                position = FloatValue()
-                position.value = joint['position']
-                params['position'] = position
+        return jointstate_pb_from_request(joint, fields, timestamp=True)
 
-            # elif field == JointStateField.SPEED:
-            #     params['speed'] = joint.speed
+    def StreamAllJointsState(self, request: js_pb.StreamAllJointsRequest, context) -> Iterator[js_pb.AllJointsState]:
+        """Continuously stream all joints up-to-date state."""
+        dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else 1.0
+        fields = request.requested_fields
 
-            # elif field == JointStateField.LOAD:
-            #     params['load'] = joint.load
+        timestamp = Timestamp()
 
-        joint_state = joint_state_pb2.JointState(**params)
-        return joint_state
-
-    def GetJointState(self, request: joint_state_pb2.JointRequest, context):
-        return self.get_joint_state(request.name, request.requested_fields)
-
-    def StreamJointState(self, request, context):
         while True:
-            yield self.GetJointState(request, context)
-            time.sleep(1 / JointStateProvider.STREAM_FREQ)
+            timestamp.GetCurrentTime()
 
-    def GetAllJointsState(self, request, context):
-        joints = []
-        for name in self.sdk_server.joints.keys():
-            joints.append(self.get_joint_state(name, request.requested_fields))
+            params = {
+                'joints': [
+                    jointstate_pb_from_request(joint, fields, timestamp=False)
+                    for joint in self.joints.values()
+                ],
+                'timestamp': timestamp,
+            }
+            yield js_pb.AllJointsState(**params)
+            time.sleep(dt)
 
-        all_joints_state = joint_state_pb2.AllJointsState()
-        all_joints_state.joints.extend(joints)
-        return all_joints_state
+    def SendCommand(self, request: jc_pb.JointCommand, context) -> jc_pb.JointCommandAck:
+        """Handle new received command.
 
-    def StreamAllJointsState(self, request, context):
-        while True:
-            yield self.GetAllJointsState(request, context)
-            time.sleep(1 / JointStateProvider.STREAM_FREQ)
-
-
-class JointCommandProvider(joint_command_pb2_grpc.JointCommandServiceServicer):
-    def __init__(self, sdk_server: ReachySDKServer) -> None:
-        super().__init__()
-        self.sdk_server = sdk_server
-
-    def SetCompliancy(self, request, context) -> joint_command_pb2.JointCommandAck:
-        success = self.sdk_server.set_compliant(request.name, request.compliant)
-        return joint_command_pb2.JointCommandAck(success=success)
-
-    def SetTargetPosition(self, request, context) -> joint_command_pb2.JointCommandAck:
-        self.sdk_server.set_target_position(request.name, request.target_position)
-        return joint_command_pb2.JointCommandAck(success=True)
+        Does not properly handle the async response success at the moment.
+        """
+        success = self.handle_command(request)
+        return jc_pb.JointCommandAck(success=success)
 
 
 def main():
+    """Run the Node and the gRPC server."""
     rclpy.init()
 
-    sdk_server = ReachySDKServer()
+    sdk_server = ReachySDKServer(node_name='reachy_sdk_server')
 
-    joint_state_provider = JointStateProvider(sdk_server)
-    joint_command_provider = JointCommandProvider(sdk_server)
-
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
-
-    joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(joint_state_provider, server)
-    joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(joint_command_provider, server)
+    server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10))
+    joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
+    joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50051')
     server.start()
+
     rclpy.spin(sdk_server)
     rclpy.shutdown()
+
     server.wait_for_termination()
 
 
