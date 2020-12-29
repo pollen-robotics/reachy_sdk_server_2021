@@ -188,10 +188,16 @@ def main():
     server.add_insecure_port('[::]:50051')
     server.start()
 
-    rclpy.spin(sdk_server)
-    rclpy.shutdown()
+    try:
+        rclpy.spin(sdk_server)
+    except KeyboardInterrupt:
+        pass
 
+    server.stop(grace=None)
     server.wait_for_termination()
+
+    sdk_server.destroy_node()
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
