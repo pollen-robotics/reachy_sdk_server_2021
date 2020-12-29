@@ -132,6 +132,12 @@ class ReachySDKServer(Node,
         if command.HasField('goal_position'):
             self.joints[command.name]['goal_position'] = command.goal_position.value
 
+        if command.HasField('speed_limit'):
+            self.joints[command.name]['speed_limit'] = command.speed_limit.value
+
+        if command.HasField('torque_limit'):
+            self.joints[command.name]['torque_limit'] = command.torque_limit.value
+
         if command.HasField('compliant'):
             request = SetCompliant.Request()
             request.name = [command.name]
