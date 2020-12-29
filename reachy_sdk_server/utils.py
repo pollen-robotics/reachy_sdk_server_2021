@@ -31,13 +31,13 @@ def jointstate_pb_from_request(joint: Dict, fields: List, timestamp: bool) -> Jo
         if field == JointStateField.NAME:
             params['name'] = joint['name']
 
-        elif field == JointStateField.PRESENT_POSITION:
+        elif field == JointStateField.PRESENT_POSITION and joint['present_position'] is not None:
             _inject_pb_value(params, joint, 'present_position', FloatValue)
 
-        elif field == JointStateField.PRESENT_SPEED:
+        elif field == JointStateField.PRESENT_SPEED and joint['present_speed'] is not None:
             _inject_pb_value(params, joint, 'present_speed', FloatValue)
 
-        elif field == JointStateField.PRESENT_LOAD:
+        elif field == JointStateField.PRESENT_LOAD and joint['present_load'] is not None:
             _inject_pb_value(params, joint, 'present_load', FloatValue)
 
         elif field == JointStateField.TEMPERATURE:
