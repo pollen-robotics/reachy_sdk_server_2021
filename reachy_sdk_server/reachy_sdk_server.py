@@ -78,11 +78,15 @@ class ReachySDKServer(Node,
         full_state_resp = fut.result()
 
         for i, name in enumerate(full_state_resp.name):
+            pos = full_state_resp.present_position[i] if full_state_resp.present_position else None
+            speed = full_state_resp.present_speed[i] if full_state_resp.present_speed else None
+            load = full_state_resp.present_load[i] if full_state_resp.present_load else None
+
             self.joints[name] = {
                 'name': name,
-                'present_position': full_state_resp.present_position[i],
-                'present_speed': full_state_resp.present_speed[i],
-                'present_load': full_state_resp.present_load[i],
+                'present_position': pos,
+                'present_speed': speed,
+                'present_load': load,
                 'temperature': full_state_resp.temperature[i],
                 'compliant': full_state_resp.compliant[i],
                 'goal_position': full_state_resp.goal_position[i],
@@ -92,11 +96,14 @@ class ReachySDKServer(Node,
 
     def on_joint_states(self, joint_state: msg.JointState) -> None:
         """Update joints position/velocity/effort on joint_state msg."""
-        for name, position, velocity, effort in zip(joint_state.name, joint_state.position,
-                                                    joint_state.velocity, joint_state.effort):
-            self.joints[name]['present_position'] = position
-            self.joints[name]['present_speed'] = velocity
-            self.joints[name]['present_load'] = effort
+
+        for i, name in enumerate(joint_state.name):
+            if joint_state.position:
+                self.joints[name]['present_position'] = joint_state.position[i]
+            if joint_state.velocity:
+                self.joints[name]['present_speed'] = joint_state.velocity[i]
+            if joint_state.effort:
+                self.joints[name]['present_load'] = joint_state.effort[i]
 
     def on_joint_temperatures(self, joint_temperature: JointTemperature) -> None:
         """Update joints temperature on joint_temperature msg."""
