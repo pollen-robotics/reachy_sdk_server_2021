@@ -46,6 +46,7 @@ class ReachySDKServer(Node,
 
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
         self.setup()
+        self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetCompliant, 'set_compliant')
@@ -129,18 +130,20 @@ class ReachySDKServer(Node,
 
         Does not handle the async response at the moment.
         """
+        name = self.joint_names[command.id]
+
         if command.HasField('goal_position'):
-            self.joints[command.name]['goal_position'] = command.goal_position.value
+            self.joints[name]['goal_position'] = command.goal_position.value
 
         if command.HasField('speed_limit'):
-            self.joints[command.name]['speed_limit'] = command.speed_limit.value
+            self.joints[name]['speed_limit'] = command.speed_limit.value
 
         if command.HasField('torque_limit'):
-            self.joints[command.name]['torque_limit'] = command.torque_limit.value
+            self.joints[name]['torque_limit'] = command.torque_limit.value
 
         if command.HasField('compliant'):
             request = SetCompliant.Request()
-            request.name = [command.name]
+            request.name = [name]
             request.compliant = [command.compliant.value]
             future = self.compliant_client.call_async(request)
             # TODO: how to properly wait for the result and handles it?
