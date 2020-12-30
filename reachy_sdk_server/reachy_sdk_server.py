@@ -130,7 +130,7 @@ class ReachySDKServer(Node,
 
         Does not handle the async response at the moment.
         """
-        name = self.joint_names[command.id]
+        name = self.id2names[command.id]
 
         if command.HasField('goal_position'):
             self.joints[name]['goal_position'] = command.goal_position.value
