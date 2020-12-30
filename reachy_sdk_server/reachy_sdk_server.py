@@ -4,6 +4,7 @@ import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Iterator
+from threading import Event
 
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -55,6 +56,7 @@ class ReachySDKServer(Node,
             msg_type=msg.JointState, topic='joint_states',
             callback=self.on_joint_states, qos_profile=5,
         )
+        self.joint_state_pub_event = Event()
         self.joint_temperatures_sub = self.create_subscription(
             msg_type=JointTemperature, topic='joint_temperatures',
             callback=self.on_joint_temperatures, qos_profile=5,
@@ -105,6 +107,8 @@ class ReachySDKServer(Node,
                 self.joints[name]['present_speed'] = joint_state.velocity[i]
             if joint_state.effort:
                 self.joints[name]['present_load'] = joint_state.effort[i]
+
+        self.joint_state_pub_event.set()
 
     def on_joint_temperatures(self, joint_temperature: JointTemperature) -> None:
         """Update joints temperature on joint_temperature msg."""
@@ -164,12 +168,16 @@ class ReachySDKServer(Node,
 
     def StreamAllJointsState(self, request: js_pb.StreamAllJointsRequest, context) -> Iterator[js_pb.AllJointsState]:
         """Continuously stream all joints up-to-date state."""
-        dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else 1.0
+        dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
+        last_pub = time.time()
+
         fields = request.requested_fields
-
         timestamp = Timestamp()
-
+        
         while True:
+            self.joint_state_pub_event.wait()
+            self.joint_state_pub_event.clear()
+
             timestamp.GetCurrentTime()
 
             params = {
@@ -180,7 +188,12 @@ class ReachySDKServer(Node,
                 'timestamp': timestamp,
             }
             yield js_pb.AllJointsState(**params)
-            time.sleep(dt)
+
+            t = time.time()
+            elapsed_time = t - last_pub
+            if elapsed_time < dt:
+                time.sleep(dt - elapsed_time)
+            last_pub = t
 
     def SendCommand(self, request: jc_pb.JointCommand, context) -> jc_pb.JointCommandAck:
         """Handle new received command.
