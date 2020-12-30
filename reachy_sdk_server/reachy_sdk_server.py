@@ -65,6 +65,10 @@ class ReachySDKServer(Node,
         self.joint_goals_pub = self.create_publisher(
             msg_type=msg.JointState, topic='joint_goals', qos_profile=5,
         )
+        self.should_publish_position = Event()
+        self.should_publish_velocity = Event()
+        self.should_publish_effort = Event()
+
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
         self.logger.info('SDK ready to be served!')
 
@@ -120,14 +124,28 @@ class ReachySDKServer(Node,
 
         Automatically called at a predefined frequency.
         """
-        # TODO: only publish when and what's needed?
-        joint_goals = msg.JointState()
-        joint_goals.header.stamp = self.clock.now().to_msg()
-        joint_goals.name = self.joints.keys()
-        joint_goals.position = [j['goal_position'] for j in self.joints.values()]
-        joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
-        joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
-        self.joint_goals_pub.publish(joint_goals)
+        if any((
+            self.should_publish_position.is_set(),
+            self.should_publish_velocity.is_set(),
+            self.should_publish_effort.is_set(),
+        )):
+            joint_goals = msg.JointState()
+            joint_goals.header.stamp = self.clock.now().to_msg()
+            joint_goals.name = self.joints.keys()
+
+            if self.should_publish_position.is_set():
+                joint_goals.position = [j['goal_position'] for j in self.joints.values()]
+                self.should_publish_position.clear()
+
+            if self.should_publish_velocity.is_set():
+                joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
+                self.should_publish_velocity.clear()
+                
+            if self.should_publish_effort.is_set():
+                joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
+                self.should_publish_effort.clear()
+
+            self.joint_goals_pub.publish(joint_goals)
 
     def handle_command(self, command: jc_pb.JointCommand) -> bool:
         """Handle new received command.
@@ -138,12 +156,15 @@ class ReachySDKServer(Node,
 
         if command.HasField('goal_position'):
             self.joints[name]['goal_position'] = command.goal_position.value
+            self.should_publish_position.set()
 
         if command.HasField('speed_limit'):
             self.joints[name]['speed_limit'] = command.speed_limit.value
+            self.should_publish_velocity.set()
 
         if command.HasField('torque_limit'):
             self.joints[name]['torque_limit'] = command.torque_limit.value
+            self.should_publish_effort.set()
 
         if command.HasField('compliant'):
             request = SetCompliant.Request()
