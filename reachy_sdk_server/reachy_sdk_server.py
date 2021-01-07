@@ -19,18 +19,21 @@ from reachy_msgs.srv import GetJointsFullState, SetCompliant
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
+from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
 
 from sensor_msgs import msg
 
 from .utils import jointstate_pb_from_request
+from .camera_subscriber import CameraSubcriber
 
 
 class ReachySDKServer(Node,
                       joint_state_pb2_grpc.JointStateServiceServicer,
-                      joint_command_pb2_grpc.JointCommandServiceServicer):
+                      joint_command_pb2_grpc.JointCommandServiceServicer,
+                      camera_pb2_grpc.CameraServiceServicer):
     """Reachy SDK server node."""
 
-    def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
+    def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100, img_topic: str = 'left_image') -> None:
         """Set up the node.
 
         Subscribe to /joint_state, /joint_temp.
@@ -71,6 +74,8 @@ class ReachySDKServer(Node,
 
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
         self.logger.info('SDK ready to be served!')
+
+        self.cam_sub = CameraSubcriber(node_name='cam_sub', topic=img_topic)
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
@@ -233,6 +238,12 @@ class ReachySDKServer(Node,
                     success = False
         return jc_pb.JointCommandAck(success=success)
 
+    # Camera GRPC
+    def GetImage(self, request, context):
+        rclpy.spin_once(self.cam_sub)
+        imMsg = cam_pb.Image()
+        imMsg.image = self.cam_sub.image.tobytes()
+        return imMsg
 
 def main():
     """Run the Node and the gRPC server."""
@@ -240,9 +251,13 @@ def main():
 
     sdk_server = ReachySDKServer(node_name='reachy_sdk_server')
 
-    server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10))
+    options = [
+        ('grpc.max_send_message_length', 512 * 1024 * 1024),
+        ('grpc.max_receive_message_length', 512 * 1024 * 1024)]
+    server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10), options=options)
     joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
+    camera_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50051')
     server.start()
