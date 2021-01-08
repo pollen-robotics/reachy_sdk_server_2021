@@ -24,7 +24,7 @@ from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
 from sensor_msgs import msg
 
 from .utils import jointstate_pb_from_request
-from .camera_subscriber import CameraSubcriber
+from .camera_subscriber import CameraSubscriber
 
 
 class ReachySDKServer(Node,
@@ -75,7 +75,12 @@ class ReachySDKServer(Node,
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
         self.logger.info('SDK ready to be served!')
 
-        self.cam_sub = CameraSubcriber(node_name='cam_sub', topic=img_topic)
+        self.left_cam = CameraSubscriber(side='left')
+        self.right_cam = CameraSubscriber(side='right')
+        self.cam_sub = {
+            'left': self.left_cam,
+            'right': self.right_cam
+        }
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
@@ -199,7 +204,7 @@ class ReachySDKServer(Node,
 
         fields = request.requested_fields
         timestamp = Timestamp()
-        
+
         while True:
             self.joint_state_pub_event.wait()
             self.joint_state_pub_event.clear()
@@ -240,10 +245,12 @@ class ReachySDKServer(Node,
 
     # Camera GRPC
     def GetImage(self, request, context):
-        rclpy.spin_once(self.cam_sub)
+        cam_requested = self.cam_sub[request.side]
+        rclpy.spin_once(cam_requested)
         imMsg = cam_pb.Image()
-        imMsg.image = self.cam_sub.image.tobytes()
+        imMsg.image = self.cam_requested.image.tobytes()
         return imMsg
+
 
 def main():
     """Run the Node and the gRPC server."""

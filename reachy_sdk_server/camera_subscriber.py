@@ -6,13 +6,13 @@ from sensor_msgs.msg._compressed_image import CompressedImage
 from cv_bridge import CvBridge
 
 
-class CameraSubcriber(Node):
-    def __init__(self, node_name: str, topic: str) -> None:
-        super().__init__(node_name=node_name)
+class CameraSubscriber(Node):
+    def __init__(self, side: str) -> None:
+        super().__init__(node_name=side+'_cam_subscriber')
         self.clock = self.get_clock()
-        self.camera_sdk_subscriber = self.create_subscription(
+        self.cam_sub = self.create_subscription(
             CompressedImage,
-            'left_image',
+            side+'_image',
             self.decode_img,
             1)
         self.bridge = CvBridge()
