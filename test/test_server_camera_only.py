@@ -49,8 +49,8 @@ if __name__ == "__main__":
     rclpy.init()
 
     options = [
-        ('grpc.max_send_message_length', 512 * 1024 * 1024),
-        ('grpc.max_receive_message_length', 512 * 1024 * 1024)]
+        ('grpc.max_send_message_length', 200000),
+        ('grpc.max_receive_message_length', 200000)]
     server = grpc.server(ThreadPoolExecutor(max_workers=10), options=options)
     camera_pb2_grpc.add_CameraServiceServicer_to_server(CameraSDKServer(), server)
     server.add_insecure_port('[::]:50051')
