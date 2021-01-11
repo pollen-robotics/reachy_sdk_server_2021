@@ -6,6 +6,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Iterator
 from threading import Event
 
+import cv2 as cv
+from cv_bridge import CvBridge
+
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
 
@@ -22,6 +25,7 @@ from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
 
 from sensor_msgs import msg
+from sensor_msgs.msg._compressed_image import CompressedImage
 
 from .utils import jointstate_pb_from_request
 from .camera_subscriber import CameraSubscriber
@@ -33,7 +37,7 @@ class ReachySDKServer(Node,
                       camera_pb2_grpc.CameraServiceServicer):
     """Reachy SDK server node."""
 
-    def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100, img_topic: str = 'left_image') -> None:
+    def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
         """Set up the node.
 
         Subscribe to /joint_state, /joint_temp.
@@ -75,11 +79,20 @@ class ReachySDKServer(Node,
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
         self.logger.info('SDK ready to be served!')
 
-        self.left_cam = CameraSubscriber(side='left')
-        self.right_cam = CameraSubscriber(side='right')
-        self.cam_sub = {
-            'left': self.left_cam,
-            'right': self.right_cam
+        self.left_cam_sub = self.create_subscription(
+            CompressedImage,
+            'left_image',
+            self.decode_left_img,
+            1)
+        self.right_cam_sub = self.create_subscription(
+            CompressedImage,
+            'right_image',
+            self.decode_right_img,
+            1)
+        self.cv_bridge = CvBridge()
+        self.cam_img = {
+            'left': None,
+            'right': None
         }
 
     def setup(self) -> None:
@@ -185,6 +198,18 @@ class ReachySDKServer(Node,
 
         return True
 
+    def decode_left_img(self, msg):
+        """Callback for '/left_image' subscriber."""
+        img = self.cv_bridge.compressed_imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        _, img = cv.imencode('.JPEG', img)
+        self.cam_img['left'] = img
+
+    def decode_right_img(self, msg):
+        """Callback for '/right_image' subscriber."""
+        img = self.cv_bridge.compressed_imgmsg_to_cv2(msg, desired_encoding='bgr8')
+        _, img = cv.imencode('.JPEG', img)
+        self.cam_img['right'] = img
+
     # Handle GRPCs
     def GetAllJointNames(self, request: Empty, context) -> js_pb.JointNames:
         """Get all the joints name."""
@@ -245,11 +270,10 @@ class ReachySDKServer(Node,
 
     # Camera GRPC
     def GetImage(self, request, context):
-        cam_requested = self.cam_sub[request.side]
-        rclpy.spin_once(cam_requested)
-        imMsg = cam_pb.Image()
-        imMsg.image = self.cam_requested.image.tobytes()
-        return imMsg
+        """Get the image from the requested camera topic."""
+        im_msg = cam_pb.Image()
+        im_msg.data = self.cam_img[request.side].tobytes()
+        return im_msg
 
 
 def main():
@@ -259,8 +283,8 @@ def main():
     sdk_server = ReachySDKServer(node_name='reachy_sdk_server')
 
     options = [
-        ('grpc.max_send_message_length', 512 * 1024 * 1024),
-        ('grpc.max_receive_message_length', 512 * 1024 * 1024)]
+        ('grpc.max_send_message_length', 200000),  # empirical value, might be adjusted
+        ('grpc.max_receive_message_length', 200000)]
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10), options=options)
     joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
