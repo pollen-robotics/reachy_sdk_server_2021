@@ -6,6 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Iterator
 from threading import Event
 
+from functools import partial
+
 import cv2 as cv
 from cv_bridge import CvBridge
 
@@ -28,7 +30,6 @@ from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
 
 from .utils import jointstate_pb_from_request
-from .camera_subscriber import CameraSubscriber
 
 
 class ReachySDKServer(Node,
@@ -82,12 +83,12 @@ class ReachySDKServer(Node,
         self.left_cam_sub = self.create_subscription(
             CompressedImage,
             'left_image',
-            self.decode_left_img,
+            partial(self.decode_img, side='left'),
             1)
         self.right_cam_sub = self.create_subscription(
             CompressedImage,
             'right_image',
-            self.decode_right_img,
+            partial(self.decode_img, side='right'),
             1)
         self.cv_bridge = CvBridge()
         self.cam_img = {
@@ -198,17 +199,11 @@ class ReachySDKServer(Node,
 
         return True
 
-    def decode_left_img(self, msg):
-        """Callback for '/left_image' subscriber."""
+    def decode_img(self, msg, side):
+        """Callback for "/'side'_image "subscriber."""
         img = self.cv_bridge.compressed_imgmsg_to_cv2(msg, desired_encoding='bgr8')
         _, img = cv.imencode('.JPEG', img)
-        self.cam_img['left'] = img
-
-    def decode_right_img(self, msg):
-        """Callback for '/right_image' subscriber."""
-        img = self.cv_bridge.compressed_imgmsg_to_cv2(msg, desired_encoding='bgr8')
-        _, img = cv.imencode('.JPEG', img)
-        self.cam_img['right'] = img
+        self.cam_img[side] = img
 
     # Handle GRPCs
     def GetAllJointNames(self, request: Empty, context) -> js_pb.JointNames:
