@@ -19,12 +19,13 @@ import grpc
 import rclpy
 from rclpy.node import Node
 
-from reachy_msgs.msg import JointTemperature
+from reachy_msgs.msg import JointTemperature, LoadSensor
 from reachy_msgs.srv import GetJointsFullState, SetCompliant
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
+from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
@@ -35,13 +36,14 @@ from .utils import jointstate_pb_from_request
 class ReachySDKServer(Node,
                       joint_state_pb2_grpc.JointStateServiceServicer,
                       joint_command_pb2_grpc.JointCommandServiceServicer,
-                      camera_pb2_grpc.CameraServiceServicer):
+                      camera_pb2_grpc.CameraServiceServicer,
+                      load_sensor_pb2_grpc.LoadServiceServicer):
     """Reachy SDK server node."""
 
     def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
         """Set up the node.
 
-        Subscribe to /joint_state, /joint_temp.
+        Subscribe to /joint_state, /joint_temp, /force_gripper.
         Publish new command on /joint_goal or concerned services.
 
         """
@@ -54,6 +56,7 @@ class ReachySDKServer(Node,
         self.logger = self.get_logger()
 
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
+        self.load_sensors: Dict[str, float] = OrderedDict()
         self.setup()
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
 
@@ -69,7 +72,10 @@ class ReachySDKServer(Node,
             msg_type=JointTemperature, topic='joint_temperatures',
             callback=self.on_joint_temperatures, qos_profile=5,
         )
-
+        self.load_sensor_sub = self.create_subscription(
+            msg_type=LoadSensor, topic='force_gripper',
+            callback=self.on_load_sensors, qos_profile=5,
+        )
         self.joint_goals_pub = self.create_publisher(
             msg_type=msg.JointState, topic='joint_goals', qos_profile=5,
         )
@@ -142,6 +148,11 @@ class ReachySDKServer(Node,
         """Update joints temperature on joint_temperature msg."""
         for name, temp in zip(joint_temperature.name, joint_temperature.temperature):
             self.joints[name]['temperature'] = temp.temperature
+
+    def on_load_sensors(self, load_sensor: LoadSensor) -> None:
+        """Update load sensor value on load_sensor msg."""
+        for side, load in zip(load_sensor.side, load_sensor.load_value):
+            self.load_sensors[side] = load
 
     def on_joint_goals_publish(self) -> None:
         """Publish position/velocity/effort on joint_goals.
@@ -263,6 +274,12 @@ class ReachySDKServer(Node,
                     success = False
         return jc_pb.JointCommandAck(success=success)
 
+    def GetLoad(self, request: ls_pb.LoadValue, context):
+        """Get the requested load value."""
+        load_msg = ls_pb.LoadValue()
+        load_msg.load = self.load_sensors[request.side]
+        return load_msg
+
     # Camera GRPC
     def GetImage(self, request, context):
         """Get the image from the requested camera topic."""
@@ -284,6 +301,7 @@ def main():
     joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
     camera_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
+    load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50051')
     server.start()
