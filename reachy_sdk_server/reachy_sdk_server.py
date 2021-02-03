@@ -265,6 +265,14 @@ class ReachySDKServer(Node,
         success = self.handle_command(request)
         return jc_pb.JointCommandAck(success=success)
 
+    def SendAllJointsCommand(self, request_iterator: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
+        success = True
+        for cmd in request.commands:
+            resp = self.handle_command(cmd)
+            if not resp:
+                success = False
+        return jc_pb.JointCommandAck(success=success)
+
     def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
         success = True
         for request in request_iterator:
@@ -303,7 +311,7 @@ def main():
     camera_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
     load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
 
-    server.add_insecure_port('[::]:50051')
+    server.add_insecure_port('[::]:50055')
     server.start()
 
     try:
