@@ -315,8 +315,8 @@ def main():
     sdk_server = ReachySDKServer(node_name='reachy_sdk_server')
 
     options = [
-        ('grpc.max_send_message_length', 200000),  # empirical value, might be adjusted
-        ('grpc.max_receive_message_length', 200000)]
+        ('grpc.max_send_message_length', 250000),  # empirical value, might be adjusted
+        ('grpc.max_receive_message_length', 250000)]
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10), options=options)
     joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
