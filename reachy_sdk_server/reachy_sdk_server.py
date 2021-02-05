@@ -29,7 +29,7 @@ from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2 as orbk_pb, orbita_kinematics_pb2_grpc
-
+from reachy_sdk_api import kinematics_pb2 as kin_pb
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
@@ -296,12 +296,17 @@ class ReachySDKServer(Node,
     # Orbita GRPC
     def ComputeOrbitaIK(self, request, context):
         """Compute Orbita's disks positions for a requested quaternion."""
-        orbik_request = GetOrbitaIK.Request()
-        orbik_request.quat.x = request.q.x
-        orbik_request.quat.y = request.q.y
-        orbik_request.quat.z = request.q.z
-        orbik_request.quat.w = request.q.w
-        future = self.orbita_ik_client.call_async(orbik_request)
+        orb_ik_request = GetOrbitaIK.Request()
+        orb_ik_request.quat.x = request.q.x
+        orb_ik_request.quat.y = request.q.y
+        orb_ik_request.quat.z = request.q.z
+        orb_ik_request.quat.w = request.q.w
+        future = self.orbita_ik_client.call_async(orb_ik_request)
+        rclpy.spin_until_future_complete(self, future)
+        response = future.result()
+        disk_ik = kin_pb.JointsPosition()
+        disk_ik = response.disk_pos.position
+        return disk_ik
 
 
 def main():
