@@ -9,6 +9,8 @@ from threading import Event
 from functools import partial
 
 import cv2 as cv
+import reachy_sdk_api
+
 from cv_bridge import CvBridge
 
 from google.protobuf.empty_pb2 import Empty
@@ -20,12 +22,14 @@ import rclpy
 from rclpy.node import Node
 
 from reachy_msgs.msg import JointTemperature, LoadSensor
-from reachy_msgs.srv import GetJointsFullState, SetCompliant
+from reachy_msgs.srv import GetJointsFullState, SetCompliant, GetOrbitaIK
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
+from reachy_sdk_api import orbita_kinematics_pb2 as orbk_pb, orbita_kinematics_pb2_grpc
+
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
@@ -37,7 +41,8 @@ class ReachySDKServer(Node,
                       joint_state_pb2_grpc.JointStateServiceServicer,
                       joint_command_pb2_grpc.JointCommandServiceServicer,
                       camera_pb2_grpc.CameraServiceServicer,
-                      load_sensor_pb2_grpc.LoadServiceServicer):
+                      load_sensor_pb2_grpc.LoadServiceServicer,
+                      orbita_kinematics_pb2_grpc.OrbitaKinematicServicer):
     """Reachy SDK server node."""
 
     def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
@@ -62,6 +67,7 @@ class ReachySDKServer(Node,
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetCompliant, 'set_compliant')
+        self.orbita_ik_client = self.create_client(GetOrbitaIK, 'orbita_ik')
 
         self.joint_states_sub = self.create_subscription(
             msg_type=msg.JointState, topic='joint_states',
@@ -286,6 +292,16 @@ class ReachySDKServer(Node,
         im_msg = cam_pb.Image()
         im_msg.data = self.cam_img[request.side].tobytes()
         return im_msg
+
+    # Orbita GRPC
+    def ComputeOrbitaIK(self, request, context):
+        """Compute Orbita's disks positions for a requested quaternion."""
+        orbik_request = GetOrbitaIK.Request()
+        orbik_request.quat.x = request.q.x
+        orbik_request.quat.y = request.q.y
+        orbik_request.quat.z = request.q.z
+        orbik_request.quat.w = request.q.w
+        future = self.orbita_ik_client.call_async(orbik_request)
 
 
 def main():
