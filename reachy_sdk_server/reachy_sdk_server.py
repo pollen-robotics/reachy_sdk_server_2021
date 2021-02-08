@@ -302,11 +302,13 @@ class ReachySDKServer(Node,
         orb_ik_request.quat.z = request.q.z
         orb_ik_request.quat.w = request.q.w
         future = self.orbita_ik_client.call_async(orb_ik_request)
-        rclpy.spin_until_future_complete(self, future)
+        while not future.done():
+            time.sleep(0.01)
         response = future.result()
-        disk_ik = kin_pb.JointsPosition()
-        disk_ik = response.disk_pos.position
-        return disk_ik
+        ik_msg = kin_pb.JointsPosition(
+            positions=response.disk_pos.position.tolist(),
+        )
+        return ik_msg
 
 
 def main():
@@ -323,6 +325,7 @@ def main():
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
     camera_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
     load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
+    orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50051')
     server.start()
