@@ -26,7 +26,7 @@ from reachy_msgs.srv import GetJointsFullState, SetCompliant, GetOrbitaIK
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
-from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
+from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2 as orbk_pb, orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2 as kin_pb
@@ -40,7 +40,7 @@ from .utils import jointstate_pb_from_request
 class ReachySDKServer(Node,
                       joint_state_pb2_grpc.JointStateServiceServicer,
                       joint_command_pb2_grpc.JointCommandServiceServicer,
-                      camera_reachy_pb2_grpc.CameraServiceServicer,
+                      camera_pb2_grpc.CameraServiceServicer,
                       load_sensor_pb2_grpc.LoadServiceServicer,
                       orbita_kinematics_pb2_grpc.OrbitaKinematicServicer):
     """Reachy SDK server node."""
@@ -324,11 +324,13 @@ class ReachySDKServer(Node,
         orb_ik_request.quat.z = request.q.z
         orb_ik_request.quat.w = request.q.w
         future = self.orbita_ik_client.call_async(orb_ik_request)
-        rclpy.spin_until_future_complete(self, future)
+        while not future.done():
+            time.sleep(0.01)
         response = future.result()
-        disk_ik = kin_pb.JointsPosition()
-        disk_ik = response.disk_pos.position
-        return disk_ik
+        ik_msg = kin_pb.JointsPosition(
+            positions=response.disk_pos.position.tolist(),
+        )
+        return ik_msg
 
 
 def main():
@@ -343,10 +345,11 @@ def main():
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10), options=options)
     joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
-    camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
+    camera_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
     load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
+    orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
 
-    server.add_insecure_port('[::]:50055')
+    server.add_insecure_port('[::]:50051')
     server.start()
 
     try:
