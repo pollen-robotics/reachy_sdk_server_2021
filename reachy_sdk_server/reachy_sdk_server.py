@@ -234,6 +234,18 @@ class ReachySDKServer(Node,
 
         return jointstate_pb_from_request(joint, fields, timestamp=True)
 
+    def GetAllJointsState(self, request: js_pb.AllJointsRequest, context) -> js_pb.AllJointsState:
+        """Get all requested joints states."""
+        fields = request.requested_fields
+
+        params = {
+            'joints': [
+                jointstate_pb_from_request(joint, fields, timestamp=True)
+                for joint in self.joints.values()
+            ],
+        }
+        return js_pb.AllJointsState(**params)
+
     def StreamAllJointsState(self, request: js_pb.StreamAllJointsRequest, context) -> Iterator[js_pb.AllJointsState]:
         """Continuously stream all joints up-to-date state."""
         dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
@@ -270,6 +282,16 @@ class ReachySDKServer(Node,
         """
         success = self.handle_command(request)
         return jc_pb.JointCommandAck(success=success)
+
+
+    def SendAllJointsCommand(self, request: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
+        success = True
+        for cmd in request.commands:
+            resp = self.handle_command(cmd)
+            if not resp:
+                success = False
+        return jc_pb.JointCommandAck(success=success)
+
 
     def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
         success = True
