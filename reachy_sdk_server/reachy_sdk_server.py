@@ -26,7 +26,7 @@ from reachy_msgs.srv import GetJointsFullState, SetCompliant, GetOrbitaIK
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
-from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
+from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2 as orbk_pb, orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2 as kin_pb
@@ -35,12 +35,14 @@ from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
 
 from .utils import jointstate_pb_from_request
+from orbita_kinematics.orbita_kinematics import OrbitaKinSolver
+from geometry_msgs.msg import Quaternion
 
 
 class ReachySDKServer(Node,
                       joint_state_pb2_grpc.JointStateServiceServicer,
                       joint_command_pb2_grpc.JointCommandServiceServicer,
-                      camera_pb2_grpc.CameraServiceServicer,
+                      camera_reachy_pb2_grpc.CameraServiceServicer,
                       load_sensor_pb2_grpc.LoadServiceServicer,
                       orbita_kinematics_pb2_grpc.OrbitaKinematicServicer):
     """Reachy SDK server node."""
@@ -107,6 +109,7 @@ class ReachySDKServer(Node,
             'left': None,
             'right': None
         }
+        self.kin_solver = OrbitaKinSolver()
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
@@ -315,22 +318,44 @@ class ReachySDKServer(Node,
         im_msg.data = self.cam_img[request.side].tobytes()
         return im_msg
 
+    # # Orbita GRPC
+    # def ComputeOrbitaIK(self, request, context):
+    #     """Compute Orbita's disks positions for a requested quaternion."""
+    #     # tic = time.time()
+    #     orb_ik_request = GetOrbitaIK.Request()
+    #     orb_ik_request.quat.x = request.q.x
+    #     orb_ik_request.quat.y = request.q.y
+    #     orb_ik_request.quat.z = request.q.z
+    #     orb_ik_request.quat.w = request.q.w
+    #     future = self.orbita_ik_client.call_async(orb_ik_request)
+    #     tic = time.time()
+    #     while not future.done():
+    #         time.sleep(0.001)
+    #     self.logger.info("Compute orbita took %f" %(time.time() - tic))
+    #     response = future.result()
+    #     ik_msg = kin_pb.JointsPosition(
+    #         positions=response.disk_pos.position.tolist(),
+    #     )
+    #     # self.logger.info("Compute orbita took %f" %(time.time() - tic))
+    #     return ik_msg
+
     # Orbita GRPC
     def ComputeOrbitaIK(self, request, context):
         """Compute Orbita's disks positions for a requested quaternion."""
-        orb_ik_request = GetOrbitaIK.Request()
-        orb_ik_request.quat.x = request.q.x
-        orb_ik_request.quat.y = request.q.y
-        orb_ik_request.quat.z = request.q.z
-        orb_ik_request.quat.w = request.q.w
-        future = self.orbita_ik_client.call_async(orb_ik_request)
-        while not future.done():
-            time.sleep(0.01)
-        response = future.result()
+        tic = time.time()
+        quat_solver = Quaternion()
+        quat_solver.w = request.q.w
+        quat_solver.x = request.q.x
+        quat_solver.y = request.q.y
+        quat_solver.z = request.q.z
+        response = self.kin_solver.orbita_ik(quat_solver)
         ik_msg = kin_pb.JointsPosition(
-            positions=response.disk_pos.position.tolist(),
-        )
+            positions=response.position.tolist(),
+         )
+        print("Compute orbitaIk in : ", (time.time() - tic))
         return ik_msg
+
+
 
 
 def main():
@@ -340,16 +365,16 @@ def main():
     sdk_server = ReachySDKServer(node_name='reachy_sdk_server')
 
     options = [
-        ('grpc.max_send_message_length', 200000),  # empirical value, might be adjusted
-        ('grpc.max_receive_message_length', 200000)]
-    server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10), options=options)
+         ('grpc.max_send_message_length', 250000),  # empirical value, might be adjusted
+         ('grpc.max_receive_message_length', 250000)]
+    server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=30), options=options)
     joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
-    camera_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
+    camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
     load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
     orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
 
-    server.add_insecure_port('[::]:50051')
+    server.add_insecure_port('[::]:50055')
     server.start()
 
     try:
