@@ -8,9 +8,6 @@ from threading import Event
 
 from functools import partial
 
-import cv2 as cv
-import reachy_sdk_api
-
 from cv_bridge import CvBridge
 
 from google.protobuf.empty_pb2 import Empty
@@ -28,7 +25,7 @@ from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
-from reachy_sdk_api import orbita_kinematics_pb2 as orbk_pb, orbita_kinematics_pb2_grpc
+from reachy_sdk_api import orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2 as kin_pb
 
 from sensor_msgs import msg
@@ -352,7 +349,6 @@ class ReachySDKServer(Node,
         ik_msg = kin_pb.JointsPosition(
             positions=response.position.tolist(),
          )
-        print("Compute orbitaIk in : ", (time.time() - tic))
         return ik_msg
 
 
