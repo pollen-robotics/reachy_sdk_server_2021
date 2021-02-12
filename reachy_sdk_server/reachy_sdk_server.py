@@ -5,11 +5,13 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Iterator
 from threading import Event
-import numpy as np
-
 from functools import partial
 
-from reachy_kdl import forward_kinematics, inverse_kinematics, kinematics
+import numpy as np
+
+from reachy_kdl import forward_kinematics, inverse_kinematics
+from orbita_kinematics.orbita_kinematics import OrbitaKinSolver
+
 from cv_bridge import CvBridge
 
 from google.protobuf.empty_pb2 import Empty
@@ -33,10 +35,9 @@ from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grp
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
+from geometry_msgs.msg import Quaternion
 
 from .utils import jointstate_pb_from_request
-from orbita_kinematics.orbita_kinematics import OrbitaKinSolver
-from geometry_msgs.msg import Quaternion
 
 
 protoside_to_str = {
@@ -191,7 +192,7 @@ class ReachySDKServer(Node,
             if self.should_publish_velocity.is_set():
                 joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
                 self.should_publish_velocity.clear()
-                
+
             if self.should_publish_effort.is_set():
                 joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
                 self.should_publish_effort.clear()
@@ -291,7 +292,6 @@ class ReachySDKServer(Node,
         success = self.handle_command(request)
         return jc_pb.JointCommandAck(success=success)
 
-
     def SendAllJointsCommand(self, request: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
         success = True
         for cmd in request.commands:
@@ -299,7 +299,6 @@ class ReachySDKServer(Node,
             if not resp:
                 success = False
         return jc_pb.JointCommandAck(success=success)
-
 
     def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
         success = True
@@ -357,6 +356,7 @@ class ReachySDKServer(Node,
         ik_msg = kin_pb.JointsPosition(
             positions=response.position.tolist(),
          )
+        print("Compute orbitaIk in : ", (time.time() - tic))
         return ik_msg
 
     # Arm kinematics GRPS
@@ -366,7 +366,6 @@ class ReachySDKServer(Node,
             label=protoside_to_str[request.side] + '_arm',
             joints=request.positions.positions
         )
-        
         arm_ef = armk_pb.ArmEndEffector(
             side=request.side,
             target=kin_pb.Matrix4x4(data=np.ndarray.flatten(sol)),
@@ -387,7 +386,6 @@ class ReachySDKServer(Node,
             positions=joints
         )
         return arm_jp
-
 
 
 def main():
