@@ -218,9 +218,7 @@ class ReachySDKServer(Node,
 
     def decode_img(self, msg, side):
         """Callback for "/'side'_image "subscriber."""
-        img = self.cv_bridge.compressed_imgmsg_to_cv2(msg, desired_encoding='bgr8')
-        _, img = cv.imencode('.JPEG', img)
-        self.cam_img[side] = img
+        self.cam_img[side] = msg.data
 
     # Handle GRPCs
     def GetAllJointNames(self, request: Empty, context) -> js_pb.JointNames:
