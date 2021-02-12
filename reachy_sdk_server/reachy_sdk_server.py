@@ -5,9 +5,11 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Iterator
 from threading import Event
+import numpy as np
 
 from functools import partial
 
+from reachy_kdl import forward_kinematics, inverse_kinematics, kinematics
 from cv_bridge import CvBridge
 
 from google.protobuf.empty_pb2 import Empty
@@ -23,10 +25,11 @@ from reachy_msgs.srv import GetJointsFullState, SetCompliant, GetOrbitaIK
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
-from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
+from reachy_sdk_api import camera_pb2 as cam_pb, camera_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2 as kin_pb
+from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grpc
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
@@ -36,12 +39,19 @@ from orbita_kinematics.orbita_kinematics import OrbitaKinSolver
 from geometry_msgs.msg import Quaternion
 
 
+protoside_to_str = {
+    armk_pb.ArmSide.LEFT: 'left',
+    armk_pb.ArmSide.RIGHT: 'right',
+}
+
+
 class ReachySDKServer(Node,
                       joint_state_pb2_grpc.JointStateServiceServicer,
                       joint_command_pb2_grpc.JointCommandServiceServicer,
-                      camera_reachy_pb2_grpc.CameraServiceServicer,
+                      camera_pb2_grpc.CameraServiceServicer,
                       load_sensor_pb2_grpc.LoadServiceServicer,
-                      orbita_kinematics_pb2_grpc.OrbitaKinematicServicer):
+                      orbita_kinematics_pb2_grpc.OrbitaKinematicServicer,
+                      arm_kinematics_pb2_grpc.ArmKinematicServicer):
     """Reachy SDK server node."""
 
     def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
@@ -349,6 +359,34 @@ class ReachySDKServer(Node,
          )
         return ik_msg
 
+    # Arm kinematics GRPS
+    def ComputeArmFK(self, request, context):
+        """Compute forward kinematics for requested arm."""
+        _, sol = forward_kinematics(
+            label=protoside_to_str[request.side] + '_arm',
+            joints=request.positions.positions
+        )
+        
+        arm_ef = armk_pb.ArmEndEffector(
+            side=request.side,
+            target=kin_pb.Matrix4x4(data=np.ndarray.flatten(sol)),
+            q0=request.positions
+        )
+        return arm_ef
+
+    def ComputeArmIK(self, request, context):
+        """Compute inverse kinematics for requested arm."""
+        _, sol = inverse_kinematics(
+            label=protoside_to_str[request.side] + '_arm',
+            q0=request.q0.positions,
+            target_pose=np.array(request.target.data).reshape((4, 4))
+        )
+        joints = kin_pb.JointsPosition(positions=sol)
+        arm_jp = armk_pb.ArmJointsPosition(
+            side=request.side,
+            positions=joints
+        )
+        return arm_jp
 
 
 
@@ -364,9 +402,10 @@ def main():
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=30), options=options)
     joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
     joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
-    camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
+    camera_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
     load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
     orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
+    arm_kinematics_pb2_grpc.add_ArmKinematicServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
