@@ -12,8 +12,6 @@ import numpy as np
 from reachy_kdl import forward_kinematics, inverse_kinematics
 from orbita_kinematics.orbita_kinematics import OrbitaKinSolver
 
-from cv_bridge import CvBridge
-
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
 
@@ -112,7 +110,6 @@ class ReachySDKServer(Node,
             'right_image',
             partial(self.decode_img, side='right'),
             1)
-        self.cv_bridge = CvBridge()
         self.cam_img = {
             'left': None,
             'right': None
