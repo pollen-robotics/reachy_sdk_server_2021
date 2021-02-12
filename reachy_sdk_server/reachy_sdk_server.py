@@ -383,7 +383,7 @@ class ReachySDKServer(Node,
         _, sol = inverse_kinematics(
             label=protoside_to_str[request.side] + '_arm',
             q0=request.q0.positions,
-            target_pose=np.array(request.target.data).reshape((4,4))
+            target_pose=np.array(request.target.data).reshape((4, 4))
         )
         joints = kin_pb.JointsPosition(positions=sol)
         arm_jp = armk_pb.ArmJointsPosition(
