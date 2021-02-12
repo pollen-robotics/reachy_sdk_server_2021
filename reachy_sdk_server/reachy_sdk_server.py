@@ -9,8 +9,6 @@ import numpy as np
 
 from functools import partial
 
-import cv2 as cv
-import reachy_sdk_api
 from reachy_kdl import forward_kinematics, inverse_kinematics, kinematics
 
 from cv_bridge import CvBridge
