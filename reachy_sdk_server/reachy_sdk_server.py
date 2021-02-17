@@ -314,14 +314,6 @@ class ReachySDKServer(Node,
         success = self.handle_commands(request.commands)
         return jc_pb.JointCommandAck(success=success)
 
-    def SendAllJointsCommand(self, request: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
-        success = True
-        for cmd in request.commands:
-            resp = self.handle_command(cmd)
-            if not resp:
-                success = False
-        return jc_pb.JointCommandAck(success=success)
-
     def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
         success = True
         for request in request_iterator:
