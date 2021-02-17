@@ -3,7 +3,7 @@
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, Iterator
+from typing import Dict, Iterator, List
 from threading import Event
 from functools import partial
 
@@ -196,33 +196,54 @@ class ReachySDKServer(Node,
 
             self.joint_goals_pub.publish(joint_goals)
 
-    def handle_command(self, command: jc_pb.JointCommand) -> bool:
-        """Handle new received command.
+    def handle_commands(self, commands: List[jc_pb.JointCommand]) -> bool:
+        """Handle new received commands."""
+        success = True
 
-        Does not handle the async response at the moment.
-        """
-        name = self.id2names[command.id]
+        # Handles first compliancy as it requires specific service call.
+        names, values = [], []
+        for cmd in commands:
+            if cmd.HasField('compliant'):
+                names.append(self.id2names[cmd.id])
+                values.append(cmd.compliant.value)
+        if names:
+            request = SetCompliant.Request()
+            request.names = names
+            request.compliant = values
 
-        if command.HasField('goal_position'):
-            self.joints[name]['goal_position'] = command.goal_position.value
+            # TODO: Should be re-written using asyncio
+            future = self.compliant_client.call_async(request)
+            for _ in range(100):
+                if future.done():
+                    success = future.result()
+                time.sleep(0.01)
+            else:
+                success = False
+
+        use_goal_pos, use_goal_vel, use_goal_eff = False, False, False
+        for cmd in commands:
+            name = self.id2names[cmd.id]
+
+            if cmd.HasField('goal_position'):
+                self.joints[name]['goal_position'] = cmd.goal_position.value
+                use_goal_pos = True
+
+            if cmd.HasField('speed_limit'):
+                self.joints[name]['speed_limit'] = cmd.speed_limit.value
+                use_goal_vel = True
+
+            if cmd.HasField('torque_limit'):
+                self.joints[name]['torque_limit'] = cmd.torque_limit.value
+                use_goal_eff = True
+
+        if use_goal_pos:
             self.should_publish_position.set()
-
-        if command.HasField('speed_limit'):
-            self.joints[name]['speed_limit'] = command.speed_limit.value
+        if use_goal_vel:
             self.should_publish_velocity.set()
-
-        if command.HasField('torque_limit'):
-            self.joints[name]['torque_limit'] = command.torque_limit.value
+        if use_goal_eff:
             self.should_publish_effort.set()
 
-        if command.HasField('compliant'):
-            request = SetCompliant.Request()
-            request.name = [name]
-            request.compliant = [command.compliant.value]
-            future = self.compliant_client.call_async(request)
-            # TODO: how to properly wait for the result and handles it?
-
-        return True
+        return success
 
     def decode_img(self, msg, side):
         """Callback for "/'side'_image "subscriber."""
@@ -286,24 +307,19 @@ class ReachySDKServer(Node,
 
         Does not properly handle the async response success at the moment.
         """
-        success = self.handle_command(request)
+        success = self.handle_commands([request])
         return jc_pb.JointCommandAck(success=success)
 
     def SendAllJointsCommand(self, request: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
-        success = True
-        for cmd in request.commands:
-            resp = self.handle_command(cmd)
-            if not resp:
-                success = False
+        success = self.handle_commands(request.commands)
         return jc_pb.JointCommandAck(success=success)
 
     def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
         success = True
         for request in request_iterator:
-            for cmd in request.commands:
-                resp = self.handle_command(cmd)
-                if not resp:
-                    success = False
+            resp = self.handle_commands(request.commands)
+            if not resp:
+                success = False
         return jc_pb.JointCommandAck(success=success)
 
     def GetLoad(self, request: ls_pb.LoadValue, context):
