@@ -51,7 +51,9 @@ class ReachySDKServer(Node,
                       camera_reachy_pb2_grpc.CameraServiceServicer,
                       load_sensor_pb2_grpc.LoadServiceServicer,
                       orbita_kinematics_pb2_grpc.OrbitaKinematicServicer,
-                      arm_kinematics_pb2_grpc.ArmKinematicServicer):
+                      arm_kinematics_pb2_grpc.ArmKinematicServicer,
+                      cartesian_command_pb2_grpc.CartesianCommandServiceServicer,
+                      ):
     """Reachy SDK server node."""
 
     def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
