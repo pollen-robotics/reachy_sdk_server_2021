@@ -340,31 +340,9 @@ class ReachySDKServer(Node,
         im_msg.data = self.cam_img[request.side].tobytes()
         return im_msg
 
-    # # Orbita GRPC
-    # def ComputeOrbitaIK(self, request, context):
-    #     """Compute Orbita's disks positions for a requested quaternion."""
-    #     # tic = time.time()
-    #     orb_ik_request = GetOrbitaIK.Request()
-    #     orb_ik_request.quat.x = request.q.x
-    #     orb_ik_request.quat.y = request.q.y
-    #     orb_ik_request.quat.z = request.q.z
-    #     orb_ik_request.quat.w = request.q.w
-    #     future = self.orbita_ik_client.call_async(orb_ik_request)
-    #     tic = time.time()
-    #     while not future.done():
-    #         time.sleep(0.001)
-    #     self.logger.info("Compute orbita took %f" %(time.time() - tic))
-    #     response = future.result()
-    #     ik_msg = kin_pb.JointsPosition(
-    #         positions=response.disk_pos.position.tolist(),
-    #     )
-    #     # self.logger.info("Compute orbita took %f" %(time.time() - tic))
-    #     return ik_msg
-
     # Orbita GRPC
     def ComputeOrbitaIK(self, request: orbita_pb.OrbitaTarget, context) -> kin_pb.JointsPosition:
         """Compute Orbita's disks positions for a requested quaternion."""
-
         ros_req = GetOrbitaIK.Request()
         ros_req.q = Quaternion(
             x=request.q.x,
