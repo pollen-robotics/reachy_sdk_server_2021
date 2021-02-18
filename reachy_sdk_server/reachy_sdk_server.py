@@ -338,7 +338,6 @@ class ReachySDKServer(Node,
     # Orbita GRPC
     def ComputeOrbitaIK(self, request, context):
         """Compute Orbita's disks positions for a requested quaternion."""
-        tic = time.time()
         quat_solver = Quaternion()
         quat_solver.w = request.q.w
         quat_solver.x = request.q.x
@@ -348,7 +347,6 @@ class ReachySDKServer(Node,
         ik_msg = kin_pb.JointsPosition(
             positions=response.position.tolist(),
          )
-        print("Compute orbitaIk in : ", (time.time() - tic))
         return ik_msg
 
     # Arm kinematics GRPS
