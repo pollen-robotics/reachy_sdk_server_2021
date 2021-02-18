@@ -30,6 +30,7 @@ from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2 as orbita_pb, orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2 as kin_pb
 from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grpc
+from reachy_sdk_api import cartesian_command_pb2 as cart_pb, cartesian_command_pb2_grpc
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
@@ -379,8 +380,7 @@ class ReachySDKServer(Node,
             target=kin_pb.Matrix4x4(data=M.flatten()),
         )
 
-    def ComputeArmIK(self, request: armk_pb.ArmEndEffector, context) -> armk_pb.ArmJointsPosition:
-        """Compute inverse kinematics for requested arm."""
+    def _call_arm_ik(self, request: armk_pb.ArmEndEffector):
         ik_client = self.left_arm_ik if request.side == armk_pb.ArmSide.LEFT else self.right_arm_ik
 
         ros_req = GetArmIK.Request()
@@ -393,12 +393,38 @@ class ReachySDKServer(Node,
         if request.q0:
             ros_req.q0.position = request.q0.positions
 
-        resp = ik_client.call(ros_req)
+        return ik_client.call(ros_req)
+
+    def ComputeArmIK(self, request: armk_pb.ArmEndEffector, context) -> armk_pb.ArmJointsPosition:
+        """Compute inverse kinematics for requested arm."""
+        resp = self._call_arm_ik(request)
 
         return armk_pb.ArmJointsPosition(
             side=request.side,
-            positions=kin_pb.JointsPosition(positions=resp.joint_position.position)
+            positions=kin_pb.JointsPosition(positions=resp.joint_position.position),
         )
+
+    def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+        goal_position = {}
+
+        if request.left_arm_end_effector:
+            request.left_arm_end_effector.side = armk_pb.ArmSide.LEFT
+            resp = self._call_arm_ik(request.left_arm_end_effector)
+            goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+
+        if request.right_arm_end_effector:
+            request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
+            resp = self._call_arm_ik(request.left_arm_end_effector)
+            goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+
+        if request.orbita_target:
+            resp = self.ComputeOrbitaIK(request.orbita_target, context)
+            disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
+            goal_position.update(dict(zip(disks, resp.positions)))
+
+        for name, pos in goal_position.items():
+            self.joints[name]['goal_position'] = pos
+        self.should_publish_position.set()
 
 
 def main():
