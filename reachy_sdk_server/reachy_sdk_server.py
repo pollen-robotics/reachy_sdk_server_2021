@@ -9,8 +9,7 @@ from functools import partial
 
 import numpy as np
 
-from reachy_kdl import forward_kinematics, inverse_kinematics
-from orbita_kinematics.orbita_kinematics import OrbitaKinSolver
+from scipy.spatial.transform import Rotation
 
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -22,6 +21,7 @@ from rclpy.node import Node
 
 from reachy_msgs.msg import JointTemperature, LoadSensor
 from reachy_msgs.srv import GetJointsFullState, SetCompliant, GetOrbitaIK
+from reachy_msgs.srv import GetArmIK, GetArmFK
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
@@ -33,7 +33,7 @@ from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grp
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
-from geometry_msgs.msg import Quaternion
+from geometry_msgs.msg import Point, Quaternion
 
 from .utils import jointstate_pb_from_request
 
@@ -114,7 +114,12 @@ class ReachySDKServer(Node,
             'left': None,
             'right': None
         }
-        self.kin_solver = OrbitaKinSolver()
+
+        # Kinematics
+        self.left_arm_fk = self.create_client(GetArmFK, '/reachy_left_arm_kinematics_service/forward')
+        self.left_arm_ik = self.create_client(GetArmIK, '/reachy_left_arm_kinematics_service/inverse')
+        self.right_arm_fk = self.create_client(GetArmFK, '/reachy_right_arm_kinematics_service/forward')
+        self.right_arm_ik = self.create_client(GetArmIK, '/reachy_right_arm_kinematics_service/inverse')
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
@@ -372,33 +377,48 @@ class ReachySDKServer(Node,
         print("Compute orbitaIk in : ", (time.time() - tic))
         return ik_msg
 
-    # Arm kinematics GRPS
-    def ComputeArmFK(self, request, context):
+    # Arm kinematics GRPC
+    def ComputeArmFK(self, request: armk_pb.ArmJointsPosition, context) -> armk_pb.ArmEndEffector:
         """Compute forward kinematics for requested arm."""
-        _, sol = forward_kinematics(
-            label=protoside_to_str[request.side] + '_arm',
-            joints=request.positions.positions
-        )
-        arm_ef = armk_pb.ArmEndEffector(
-            side=request.side,
-            target=kin_pb.Matrix4x4(data=np.ndarray.flatten(sol)),
-            q0=request.positions
-        )
-        return arm_ef
+        fk_client = self.left_arm_fk if request.side == armk_pb.ArmSide.LEFT else self.right_arm_fk
 
-    def ComputeArmIK(self, request, context):
-        """Compute inverse kinematics for requested arm."""
-        _, sol = inverse_kinematics(
-            label=protoside_to_str[request.side] + '_arm',
-            q0=request.q0.positions,
-            target_pose=np.array(request.target.data).reshape((4, 4))
-        )
-        joints = kin_pb.JointsPosition(positions=sol)
-        arm_jp = armk_pb.ArmJointsPosition(
+        req = GetArmFK.Request()
+        req.joint_position = request.positions.positions
+
+        resp = fk_client.call(req)
+        M = np.eye(4)
+
+        p = resp.pose.position
+        M[:3, 3] = p.x, p.y, p.z
+
+        q = resp.pose.quaternion
+        M[:3, :3] = Rotation.from_quat(q.x, q.y, q.z, q.w).as_matrix()
+
+        return armk_pb.ArmEndEffector(
             side=request.side,
-            positions=joints
+            target=kin_pb.Matrix4x4(data=M.flatten()),
         )
-        return arm_jp
+
+    def ComputeArmIK(self, request: armk_pb.ArmEndEffector, context) -> armk_pb.ArmJointsPosition:
+        """Compute inverse kinematics for requested arm."""
+        ik_client = self.left_arm_ik if request.side == armk_pb.ArmSide.LEFT else self.right_arm_ik
+
+        ros_req = GetArmIK.Request()
+        M = request.target.reshape((4, 4))
+
+        ros_req.pose.position = Point(x=M[0, 3], y=M[1, 3], z=M[2, 3])
+        q = Rotation.from_matrix(M[:3, :3]).as_quat()
+        ros_req.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+
+        if request.q0:
+            ros_req.q0.positions = request.q0
+
+        resp = ik_client.call(ros_req)
+
+        return armk_pb.ArmJointsPosition(
+            side=request.side,
+            positions=resp.joint_position.positions
+        )
 
 
 def main():
