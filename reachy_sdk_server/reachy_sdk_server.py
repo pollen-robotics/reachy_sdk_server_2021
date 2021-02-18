@@ -355,7 +355,7 @@ class ReachySDKServer(Node,
 
         return kin_pb.JointsPosition(
             positions=resp.positions,
-         )
+        )
 
     # Arm kinematics GRPC
     def ComputeArmFK(self, request: armk_pb.ArmJointsPosition, context) -> armk_pb.ArmEndEffector:
