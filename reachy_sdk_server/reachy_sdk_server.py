@@ -27,7 +27,7 @@ from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
-from reachy_sdk_api import orbita_kinematics_pb2_grpc
+from reachy_sdk_api import orbita_kinematics_pb2 as orbita_pb, orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2 as kin_pb
 from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grpc
 
@@ -75,7 +75,6 @@ class ReachySDKServer(Node,
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetCompliant, 'set_compliant')
-        self.orbita_ik_client = self.create_client(GetOrbitaIK, 'orbita_ik')
 
         self.joint_states_sub = self.create_subscription(
             msg_type=msg.JointState, topic='joint_states',
@@ -120,6 +119,7 @@ class ReachySDKServer(Node,
         self.left_arm_ik = self.create_client(GetArmIK, '/reachy_left_arm_kinematics_service/inverse')
         self.right_arm_fk = self.create_client(GetArmFK, '/reachy_right_arm_kinematics_service/forward')
         self.right_arm_ik = self.create_client(GetArmIK, '/reachy_right_arm_kinematics_service/inverse')
+        self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita_ik')
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
@@ -362,20 +362,22 @@ class ReachySDKServer(Node,
     #     return ik_msg
 
     # Orbita GRPC
-    def ComputeOrbitaIK(self, request, context):
+    def ComputeOrbitaIK(self, request: orbita_pb.OrbitaTarget, context) -> kin_pb.JointsPosition:
         """Compute Orbita's disks positions for a requested quaternion."""
-        tic = time.time()
-        quat_solver = Quaternion()
-        quat_solver.w = request.q.w
-        quat_solver.x = request.q.x
-        quat_solver.y = request.q.y
-        quat_solver.z = request.q.z
-        response = self.kin_solver.orbita_ik(quat_solver)
-        ik_msg = kin_pb.JointsPosition(
-            positions=response.position.tolist(),
+
+        ros_req = GetOrbitaIK.Request()
+        ros_req.q = Quaternion(
+            x=request.q.x,
+            y=request.q.y,
+            z=request.q.z,
+            w=request.q.w,
+        )
+
+        resp = self.orbita_ik.call(ros_req)
+
+        return kin_pb.JointsPosition(
+            positions=resp.positions,
          )
-        print("Compute orbitaIk in : ", (time.time() - tic))
-        return ik_msg
 
     # Arm kinematics GRPC
     def ComputeArmFK(self, request: armk_pb.ArmJointsPosition, context) -> armk_pb.ArmEndEffector:
