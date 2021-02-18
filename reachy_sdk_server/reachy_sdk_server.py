@@ -383,7 +383,7 @@ class ReachySDKServer(Node,
         fk_client = self.left_arm_fk if request.side == armk_pb.ArmSide.LEFT else self.right_arm_fk
 
         req = GetArmFK.Request()
-        req.joint_position = request.positions.positions
+        req.joint_position.position = request.positions.positions
 
         resp = fk_client.call(req)
         M = np.eye(4)
@@ -391,8 +391,8 @@ class ReachySDKServer(Node,
         p = resp.pose.position
         M[:3, 3] = p.x, p.y, p.z
 
-        q = resp.pose.quaternion
-        M[:3, :3] = Rotation.from_quat(q.x, q.y, q.z, q.w).as_matrix()
+        q = resp.pose.orientation
+        M[:3, :3] = Rotation.from_quat((q.x, q.y, q.z, q.w)).as_matrix()
 
         return armk_pb.ArmEndEffector(
             side=request.side,
@@ -404,20 +404,20 @@ class ReachySDKServer(Node,
         ik_client = self.left_arm_ik if request.side == armk_pb.ArmSide.LEFT else self.right_arm_ik
 
         ros_req = GetArmIK.Request()
-        M = request.target.reshape((4, 4))
+        M = np.array(request.target.data).reshape((4, 4))
 
         ros_req.pose.position = Point(x=M[0, 3], y=M[1, 3], z=M[2, 3])
         q = Rotation.from_matrix(M[:3, :3]).as_quat()
         ros_req.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
 
         if request.q0:
-            ros_req.q0.positions = request.q0
+            ros_req.q0.position = request.q0.positions
 
         resp = ik_client.call(ros_req)
 
         return armk_pb.ArmJointsPosition(
             side=request.side,
-            positions=resp.joint_position.positions
+            positions=kin_pb.JointsPosition(positions=resp.joint_position.position)
         )
 
 
