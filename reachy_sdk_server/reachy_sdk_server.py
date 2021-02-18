@@ -426,6 +426,13 @@ class ReachySDKServer(Node,
             self.joints[name]['goal_position'] = pos
         self.should_publish_position.set()
 
+        return cart_pb.CartesianCommandAck(success=True)
+
+    def StreamCartesianCommands(self, request_iterator: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+        for request in request_iterator:
+            self.SendCartesianCommand(request, context)
+        return cart_pb.CartesianCommandAck(success=True)
+
 
 def main():
     """Run the Node and the gRPC server."""
