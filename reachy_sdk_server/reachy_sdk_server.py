@@ -20,8 +20,9 @@ import rclpy
 from rclpy.node import Node
 
 from reachy_msgs.msg import JointTemperature, LoadSensor
-from reachy_msgs.srv import GetJointsFullState, SetCompliant, GetOrbitaIK
-from reachy_msgs.srv import GetArmIK, GetArmFK
+from reachy_msgs.srv import GetJointsFullState, SetCompliant
+from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK
+from reachy_msgs.srv import ZoomCommand, SetZoomSpeed
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
 from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
@@ -31,6 +32,7 @@ from reachy_sdk_api import orbita_kinematics_pb2 as orbita_pb, orbita_kinematics
 from reachy_sdk_api import kinematics_pb2 as kin_pb
 from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grpc
 from reachy_sdk_api import cartesian_command_pb2 as cart_pb, cartesian_command_pb2_grpc
+from reachy_sdk_api import zoom_command_pb2 as zc_pb, zoom_command_pb2_grpc
 
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
@@ -53,6 +55,7 @@ class ReachySDKServer(Node,
                       orbita_kinematics_pb2_grpc.OrbitaKinematicServicer,
                       arm_kinematics_pb2_grpc.ArmKinematicServicer,
                       cartesian_command_pb2_grpc.CartesianCommandServiceServicer,
+                      zoom_command_pb2_grpc.ZoomControllerServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -78,6 +81,8 @@ class ReachySDKServer(Node,
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetCompliant, 'set_compliant')
+        self.zoom_command_client = self.create_client(ZoomCommand, 'zoom_command')
+        self.zoom_speed_client = self.create_client(SetZoomSpeed, 'zoom_speed')
 
         self.joint_states_sub = self.create_subscription(
             msg_type=msg.JointState, topic='joint_states',
@@ -216,7 +221,7 @@ class ReachySDKServer(Node,
                 values.append(cmd.compliant.value)
         if names:
             request = SetCompliant.Request()
-            request.names = names
+            request.name = names
             request.compliant = values
 
             # TODO: Should be re-written using asyncio
@@ -435,6 +440,22 @@ class ReachySDKServer(Node,
             self.SendCartesianCommand(request, context)
         return cart_pb.CartesianCommandAck(success=True)
 
+    # ZoomController GRPC
+    def SendZoomCommand(self, request, context):
+        """Send command to zoom controller of the requested camera."""
+        req = ZoomCommand.Request()
+        req.side = request.side
+        req.zoom_command = request.command
+        future = self.zoom_command_client.call_async(req)
+        return zc_pb.Empty()
+
+    def SetZoomSpeed(self, request, context):
+        """Change zoom controller motors speed."""
+        req = SetZoomSpeed.Request()
+        req.speed = request.speed
+        future = self.zoom_speed_client.call_async(req)
+        return zc_pb.Empty()
+
 
 def main():
     """Run the Node and the gRPC server."""
@@ -452,6 +473,7 @@ def main():
     load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
     orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
     arm_kinematics_pb2_grpc.add_ArmKinematicServicer_to_server(sdk_server, server)
+    zoom_command_pb2_grpc.add_ZoomControllerServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
