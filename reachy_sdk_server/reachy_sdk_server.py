@@ -213,7 +213,7 @@ class ReachySDKServer(Node,
                 values.append(cmd.compliant.value)
         if names:
             request = SetCompliant.Request()
-            request.names = names
+            request.name = names
             request.compliant = values
 
             # TODO: Should be re-written using asyncio
