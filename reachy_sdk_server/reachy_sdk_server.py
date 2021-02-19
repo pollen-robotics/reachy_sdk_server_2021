@@ -352,17 +352,16 @@ class ReachySDKServer(Node,
     def ComputeOrbitaIK(self, request: orbita_pb.OrbitaTarget, context) -> kin_pb.JointsPosition:
         """Compute Orbita's disks positions for a requested quaternion."""
         ros_req = GetOrbitaIK.Request()
-        ros_req.q = Quaternion(
+        ros_req.quat = Quaternion(
             x=request.q.x,
             y=request.q.y,
             z=request.q.z,
             w=request.q.w,
         )
-
         resp = self.orbita_ik.call(ros_req)
 
         return kin_pb.JointsPosition(
-            positions=resp.positions,
+            positions=resp.disk_pos.position,
         )
 
     # Arm kinematics GRPC
@@ -414,17 +413,17 @@ class ReachySDKServer(Node,
     def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
         goal_position = {}
 
-        if request.left_arm_end_effector:
+        if request.HasField('left_arm_end_effector'):
             request.left_arm_end_effector.side = armk_pb.ArmSide.LEFT
             resp = self._call_arm_ik(request.left_arm_end_effector)
             goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
 
-        if request.right_arm_end_effector:
+        if request.HasField('right_arm_end_effector'):
             request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
-            resp = self._call_arm_ik(request.left_arm_end_effector)
+            resp = self._call_arm_ik(request.right_arm_end_effector)
             goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
 
-        if request.orbita_target:
+        if request.HasField('orbita_target'):
             resp = self.ComputeOrbitaIK(request.orbita_target, context)
             disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
             goal_position.update(dict(zip(disks, resp.positions)))
@@ -474,6 +473,7 @@ def main():
     orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
     arm_kinematics_pb2_grpc.add_ArmKinematicServicer_to_server(sdk_server, server)
     zoom_command_pb2_grpc.add_ZoomControllerServiceServicer_to_server(sdk_server, server)
+    cartesian_command_pb2_grpc.add_CartesianCommandServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
