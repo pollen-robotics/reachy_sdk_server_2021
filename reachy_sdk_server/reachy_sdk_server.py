@@ -9,7 +9,7 @@ from functools import partial
 
 import numpy as np
 
-# from reachy_kdl import forward_kinematics, inverse_kinematics
+from reachy_kdl import forward_kinematics, inverse_kinematics
 from orbita_kinematics.orbita_kinematics import OrbitaKinSolver
 
 from google.protobuf.empty_pb2 import Empty
