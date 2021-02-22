@@ -226,10 +226,11 @@ class ReachySDKServer(Node,
 
             # TODO: Should be re-written using asyncio
             future = self.compliant_client.call_async(request)
-            for _ in range(100):
+            for _ in range(1000):
                 if future.done():
                     success = future.result()
-                time.sleep(0.01)
+                    break
+                time.sleep(0.001)
             else:
                 success = False
 
