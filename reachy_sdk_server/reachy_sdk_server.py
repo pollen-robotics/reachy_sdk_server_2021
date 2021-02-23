@@ -228,7 +228,7 @@ class ReachySDKServer(Node,
             future = self.compliant_client.call_async(request)
             for _ in range(1000):
                 if future.done():
-                    success = future.result()
+                    success = future.result().success
                     break
                 time.sleep(0.001)
             else:
