@@ -1,5 +1,6 @@
 """Expose main Reachy ROS services/topics through gRPC allowing remote client SDK."""
 
+import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -412,28 +413,45 @@ class ReachySDKServer(Node,
         )
 
     def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
-        goal_position = {}
+        def bg():
+            goal_position = {}
 
-        if request.HasField('left_arm_end_effector'):
-            request.left_arm_end_effector.side = armk_pb.ArmSide.LEFT
-            resp = self._call_arm_ik(request.left_arm_end_effector)
-            goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+            if request.HasField('left_arm_end_effector'):
+                request.left_arm_end_effector.side = armk_pb.ArmSide.LEFT
+                resp = self._call_arm_ik(request.left_arm_end_effector)
+                goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
 
-        if request.HasField('right_arm_end_effector'):
-            request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
-            resp = self._call_arm_ik(request.right_arm_end_effector)
-            goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+            if request.HasField('right_arm_end_effector'):
+                request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
+                resp = self._call_arm_ik(request.right_arm_end_effector)
+                goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
 
-        if request.HasField('orbita_target'):
-            resp = self.ComputeOrbitaIK(request.orbita_target, context)
-            disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
-            goal_position.update(dict(zip(disks, resp.positions)))
+            if request.HasField('orbita_target'):
+                resp = self.ComputeOrbitaIK(request.orbita_target, context)
+                disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
+                goal_position.update(dict(zip(disks, resp.positions)))
 
-        for name, pos in goal_position.items():
-            self.joints[name]['goal_position'] = pos
-        self.should_publish_position.set()
+            for name, pos in goal_position.items():
+                self.joints[name]['goal_position'] = pos
+            self.should_publish_position.set()
 
-        return cart_pb.CartesianCommandAck(success=True)
+        t = threading.Thread(target=bg)
+        t.daemon = True
+        t.start()
+
+        while not t.is_alive():
+            time.sleep(0.001)
+
+        for _ in range(100):
+            if not t.is_alive():
+                success = True
+                break
+            time.sleep(0.001)
+        else:
+            self.logger.warning('ik service timeout!')
+            success = False
+
+        return cart_pb.CartesianCommandAck(success=success)
 
     def StreamCartesianCommands(self, request_iterator: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
         for request in request_iterator:
