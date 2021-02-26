@@ -106,7 +106,6 @@ class ReachySDKServer(Node,
         self.should_publish_effort = Event()
 
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
-        self.logger.info('SDK ready to be served!')
 
         self.left_cam_sub = self.create_subscription(
             CompressedImage,
@@ -129,6 +128,8 @@ class ReachySDKServer(Node,
         self.right_arm_fk = self.create_client(GetArmFK, '/reachy_right_arm_kinematics_service/forward')
         self.right_arm_ik = self.create_client(GetArmIK, '/reachy_right_arm_kinematics_service/inverse')
         self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita_ik')
+
+        self.logger.info('SDK ready to be served!')
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
