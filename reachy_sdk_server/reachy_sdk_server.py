@@ -431,6 +431,8 @@ class ReachySDKServer(Node,
         running = Event()
 
         def bg():
+            running.set()
+
             goal_position = {}
 
             if request.HasField('left_arm_end_effector'):
@@ -467,8 +469,7 @@ class ReachySDKServer(Node,
         t.daemon = True
         t.start()
 
-        while not t.is_alive():
-            time.sleep(0.001)
+        running.wait()
 
         for _ in range(100):
             if not t.is_alive():
