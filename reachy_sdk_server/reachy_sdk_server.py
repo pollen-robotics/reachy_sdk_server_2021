@@ -30,7 +30,7 @@ from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2 as orbita_pb, orbita_kinematics_pb2_grpc
-from reachy_sdk_api import kinematics_pb2 as kin_pb
+from reachy_sdk_api import kinematics_pb2 as kin_pb, kinematics_pb2_grpc
 from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grpc
 from reachy_sdk_api import cartesian_command_pb2 as cart_pb, cartesian_command_pb2_grpc
 from reachy_sdk_api import zoom_command_pb2 as zc_pb, zoom_command_pb2_grpc
@@ -38,6 +38,8 @@ from reachy_sdk_api import zoom_command_pb2 as zc_pb, zoom_command_pb2_grpc
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
 from geometry_msgs.msg import Point, Quaternion
+
+from reachy_arm_kinematics.utils import minjerk
 
 from .utils import jointstate_pb_from_request
 
@@ -57,6 +59,7 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicServicer,
                       cartesian_command_pb2_grpc.CartesianCommandServiceServicer,
                       zoom_command_pb2_grpc.ZoomControllerServiceServicer,
+                      kinematics_pb2_grpc.KinematicsServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -345,6 +348,15 @@ class ReachySDKServer(Node,
         load_msg.load = self.load_sensors[request.side]
         return load_msg
 
+    def ComputeMinjerk(self, request: kin_pb.MinjerkRequest, context):
+        return kin_pb.Trajectory(
+            positions=minjerk(
+                initial_position=request.present_position.value,
+                goal_position=request.goal_position.value,
+                duration=request.duration.value
+            )
+        )
+
     # Camera GRPC
     def GetImage(self, request, context):
         """Get the image from the requested camera topic."""
@@ -421,6 +433,7 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicServicer_to_server(sdk_server, server)
     zoom_command_pb2_grpc.add_ZoomControllerServiceServicer_to_server(sdk_server, server)
     cartesian_command_pb2_grpc.add_CartesianCommandServiceServicer_to_server(sdk_server, server)
+    kinematics_pb2_grpc.add_KinematicsServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
