@@ -456,7 +456,7 @@ class ReachySDKServer(Node,
                 resp = self.ComputeOrbitaIK(request.orbita_target, context)
                 if resp.success:
                     disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
-                    goal_position.update(dict(zip(disks, resp.positions)))
+                    goal_position.update(dict(zip(disks, resp.sol.positions)))
                 else:
                     nonlocal orbita_head_success
                     orbita_head_success = False
