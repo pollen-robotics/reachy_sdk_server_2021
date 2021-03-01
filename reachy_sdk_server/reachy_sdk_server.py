@@ -132,7 +132,7 @@ class ReachySDKServer(Node,
         self.right_arm_fk = self.create_client(GetArmFK, '/reachy_right_arm_kinematics_service/forward')
         self.right_arm_ik = self.create_client(GetArmIK, '/reachy_right_arm_kinematics_service/inverse')
         self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita_ik')
-        self.quat_tf = self.create_client(GetQuatTf, '/quaternion_tf')
+        self.orbita_look_at_tf = self.create_client(GetQuatTf, '/orbita_look_at_tf')
 
 
     def setup(self) -> None:
@@ -232,7 +232,7 @@ class ReachySDKServer(Node,
 
             # TODO: Should be re-written using asyncio
             future = self.compliant_client.call_async(request)
-            for _ in range(100):
+            for _ in range(1000):
                 if future.done():
                     success = future.result().success
                     break
@@ -387,7 +387,7 @@ class ReachySDKServer(Node,
             y=request.y,
             z=request.z,
         )
-        resp = self.quat_tf.call(ros_req)
+        resp = self.orbita_look_at_tf.call(ros_req)
         return orbita_pb.OrbitaTarget(
             q=orbita_pb.Quaternion(
                     w= resp.quat.w,
