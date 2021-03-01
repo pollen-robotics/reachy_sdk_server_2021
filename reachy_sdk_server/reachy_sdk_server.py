@@ -22,7 +22,7 @@ from rclpy.node import Node
 
 from reachy_msgs.msg import JointTemperature, LoadSensor
 from reachy_msgs.srv import GetJointsFullState, SetCompliant
-from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK
+from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform as GetQuatTf
 from reachy_msgs.srv import ZoomCommand, SetZoomSpeed
 
 from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
@@ -30,7 +30,7 @@ from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
 from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
 from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2 as orbita_pb, orbita_kinematics_pb2_grpc
-from reachy_sdk_api import kinematics_pb2 as kin_pb
+from reachy_sdk_api import kinematics_pb2 as kin_pb, kinematics_pb2_grpc
 from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grpc
 from reachy_sdk_api import cartesian_command_pb2 as cart_pb, cartesian_command_pb2_grpc
 from reachy_sdk_api import zoom_command_pb2 as zc_pb, zoom_command_pb2_grpc
@@ -38,6 +38,8 @@ from reachy_sdk_api import zoom_command_pb2 as zc_pb, zoom_command_pb2_grpc
 from sensor_msgs import msg
 from sensor_msgs.msg._compressed_image import CompressedImage
 from geometry_msgs.msg import Point, Quaternion
+
+from reachy_arm_kinematics.utils import minjerk
 
 from .utils import jointstate_pb_from_request
 
@@ -57,6 +59,7 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicServicer,
                       cartesian_command_pb2_grpc.CartesianCommandServiceServicer,
                       zoom_command_pb2_grpc.ZoomControllerServiceServicer,
+                      kinematics_pb2_grpc.KinematicsServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -128,7 +131,7 @@ class ReachySDKServer(Node,
         self.right_arm_fk = self.create_client(GetArmFK, '/reachy_right_arm_kinematics_service/forward')
         self.right_arm_ik = self.create_client(GetArmIK, '/reachy_right_arm_kinematics_service/inverse')
         self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita_ik')
-
+        self.orbita_look_at_tf = self.create_client(GetQuatTf, '/orbita_look_at_tf')
         self.logger.info('SDK ready to be served!')
 
     def setup(self) -> None:
@@ -344,6 +347,15 @@ class ReachySDKServer(Node,
         load_msg.load = self.load_sensors[request.side]
         return load_msg
 
+    def ComputeMinjerk(self, request: kin_pb.MinjerkRequest, context):
+        return kin_pb.Trajectory(
+            positions=minjerk(
+                initial_position=request.present_position.value,
+                goal_position=request.goal_position.value,
+                duration=request.duration.value
+            )
+        )
+
     # Camera GRPC
     def GetImage(self, request, context):
         """Get the image from the requested camera topic."""
@@ -360,7 +372,7 @@ class ReachySDKServer(Node,
             y=request.q.y,
             z=request.q.z,
             w=request.q.w,
-        )
+            )
         resp = self.orbita_ik.call(ros_req)
         if not resp.success:
             return orbita_pb.OrbitaIKSolution(success=False)
@@ -371,6 +383,23 @@ class ReachySDKServer(Node,
                 positions=resp.disk_pos.position,
             ),
         )
+
+    def GetQuaternionTransform(self, request: orbita_pb.Point, context):
+        ros_req = GetQuatTf.Request()
+        ros_req.point = Point(
+            x=request.x,
+            y=request.y,
+            z=request.z,
+        )
+        resp = self.orbita_look_at_tf.call(ros_req)
+        return orbita_pb.OrbitaTarget(
+            q=orbita_pb.Quaternion(
+                    w= resp.quat.w,
+                    x= resp.quat.x,
+                    y= resp.quat.y,
+                    z= resp.quat.z,
+                )
+            )
 
     # Arm kinematics GRPC
     def ComputeArmFK(self, request: armk_pb.ArmJointsPosition, context) -> armk_pb.ArmEndEffector:
@@ -529,6 +558,7 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicServicer_to_server(sdk_server, server)
     zoom_command_pb2_grpc.add_ZoomControllerServiceServicer_to_server(sdk_server, server)
     cartesian_command_pb2_grpc.add_CartesianCommandServiceServicer_to_server(sdk_server, server)
+    kinematics_pb2_grpc.add_KinematicsServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
