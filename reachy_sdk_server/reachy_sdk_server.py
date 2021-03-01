@@ -109,7 +109,6 @@ class ReachySDKServer(Node,
         self.should_publish_effort = Event()
 
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
-        self.logger.info('SDK ready to be served!')
 
         self.left_cam_sub = self.create_subscription(
             CompressedImage,
@@ -133,7 +132,7 @@ class ReachySDKServer(Node,
         self.right_arm_ik = self.create_client(GetArmIK, '/reachy_right_arm_kinematics_service/inverse')
         self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita_ik')
         self.orbita_look_at_tf = self.create_client(GetQuatTf, '/orbita_look_at_tf')
-
+        self.logger.info('SDK ready to be served!')
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
@@ -365,7 +364,7 @@ class ReachySDKServer(Node,
         return im_msg
 
     # Orbita GRPC
-    def ComputeOrbitaIK(self, request: orbita_pb.OrbitaTarget, context) -> kin_pb.JointsPosition:
+    def ComputeOrbitaIK(self, request: orbita_pb.OrbitaTarget, context) -> orbita_pb.OrbitaIKSolution:
         """Compute Orbita's disks positions for a requested quaternion."""
         ros_req = GetOrbitaIK.Request()
         ros_req.quat = Quaternion(
@@ -373,13 +372,18 @@ class ReachySDKServer(Node,
             y=request.q.y,
             z=request.q.z,
             w=request.q.w,
-        )
+            )
         resp = self.orbita_ik.call(ros_req)
+        if not resp.success:
+            return orbita_pb.OrbitaIKSolution(success=False)
 
-        return kin_pb.JointsPosition(
-            positions=resp.disk_pos.position,
+        return orbita_pb.OrbitaIKSolution(
+            success=True,
+            sol=kin_pb.JointsPosition(
+                positions=resp.disk_pos.position,
+            ),
         )
-    
+
     def GetQuaternionTransform(self, request: orbita_pb.Point, context):
         ros_req = GetQuatTf.Request()
         ros_req.point = Point(
@@ -397,6 +401,127 @@ class ReachySDKServer(Node,
                 )
             )
 
+    # Arm kinematics GRPC
+    def ComputeArmFK(self, request: armk_pb.ArmJointsPosition, context) -> armk_pb.ArmEndEffector:
+        """Compute forward kinematics for requested arm."""
+        fk_client = self.left_arm_fk if request.side == armk_pb.ArmSide.LEFT else self.right_arm_fk
+
+        req = GetArmFK.Request()
+        req.joint_position.position = request.positions.positions
+
+        resp = fk_client.call(req)
+        M = np.eye(4)
+
+        p = resp.pose.position
+        M[:3, 3] = p.x, p.y, p.z
+
+        q = resp.pose.orientation
+        M[:3, :3] = Rotation.from_quat((q.x, q.y, q.z, q.w)).as_matrix()
+
+        return armk_pb.ArmEndEffector(
+            side=request.side,
+            target=kin_pb.Matrix4x4(data=M.flatten()),
+        )
+
+    def _call_arm_ik(self, request: armk_pb.ArmEndEffector):
+        ik_client = self.left_arm_ik if request.side == armk_pb.ArmSide.LEFT else self.right_arm_ik
+
+        ros_req = GetArmIK.Request()
+        M = np.array(request.target.data).reshape((4, 4))
+
+        ros_req.pose.position = Point(x=M[0, 3], y=M[1, 3], z=M[2, 3])
+        q = Rotation.from_matrix(M[:3, :3]).as_quat()
+        ros_req.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+
+        if request.q0:
+            ros_req.q0.position = request.q0.positions
+
+        return ik_client.call(ros_req)
+
+    def ComputeArmIK(self, request: armk_pb.ArmEndEffector, context) -> armk_pb.ArmIKSolution:
+        """Compute inverse kinematics for requested arm."""
+        resp = self._call_arm_ik(request)
+
+        if not resp.success:
+            return armk_pb.ArmIKSolution(success=False)
+
+        return armk_pb.ArmIKSolution(
+            success=True,
+            sol=armk_pb.ArmJointsPosition(
+                side=request.side,
+                positions=kin_pb.JointsPosition(positions=resp.joint_position.position),
+            ),
+        )
+
+    def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+        left_arm_success = True
+        right_arm_success = True
+        orbita_head_success = True
+
+        running = Event()
+
+        def bg():
+            running.set()
+
+            goal_position = {}
+
+            if request.HasField('left_arm_end_effector'):
+                request.left_arm_end_effector.side = armk_pb.ArmSide.LEFT
+                resp = self._call_arm_ik(request.left_arm_end_effector)
+                if resp.success:
+                    goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+                else:
+                    left_arm_success = False
+
+            if request.HasField('right_arm_end_effector'):
+                request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
+                resp = self._call_arm_ik(request.right_arm_end_effector)
+                if resp.success:
+                    goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+                else:
+                    nonlocal right_arm_success
+                    right_arm_success = False
+
+            if request.HasField('orbita_target'):
+                resp = self.ComputeOrbitaIK(request.orbita_target, context)
+                if resp.success:
+                    disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
+                    goal_position.update(dict(zip(disks, resp.sol.positions)))
+                else:
+                    nonlocal orbita_head_success
+                    orbita_head_success = False
+
+            for name, pos in goal_position.items():
+                self.joints[name]['goal_position'] = pos
+            self.should_publish_position.set()
+
+        t = threading.Thread(target=bg)
+        t.daemon = True
+        t.start()
+
+        running.wait()
+
+        for _ in range(100):
+            if not t.is_alive():
+                success = True
+                break
+            time.sleep(0.001)
+        else:
+            self.logger.warning('ik service timeout!')
+            left_arm_success = False
+            right_arm_success = False
+            orbita_head_success = False
+
+        return cart_pb.CartesianCommandAck(
+            left_arm_success=left_arm_success,
+            right_arm_success=right_arm_success,
+            orbita_head_success=orbita_head_success,
+        )
+
+    def StreamCartesianCommands(self, request_iterator: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+        for request in request_iterator:
+            self.SendCartesianCommand(request, context)
+        return cart_pb.CartesianCommandAck()
 
     # ZoomController GRPC
     def SendZoomCommand(self, request, context):
