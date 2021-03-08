@@ -322,7 +322,7 @@ class ReachySDKServer(Node,
             last_pub = t
 
     def SendCommand(self, request: jc_pb.JointCommand, context) -> jc_pb.JointCommandAck:
-        """Handle new received command.
+        """Handle new received command for a single joint.
 
         Does not properly handle the async response success at the moment.
         """
@@ -330,10 +330,12 @@ class ReachySDKServer(Node,
         return jc_pb.JointCommandAck(success=success)
 
     def SendAllJointsCommand(self, request: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
+        """Handle commands for multiple joints."""
         success = self.handle_commands(request.commands)
         return jc_pb.JointCommandAck(success=success)
 
     def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
+        """Handle stream of commands for multiple joints."""
         success = True
         for request in request_iterator:
             resp = self.handle_commands(request.commands)
@@ -348,6 +350,7 @@ class ReachySDKServer(Node,
         return load_msg
 
     def ComputeMinjerk(self, request: kin_pb.MinjerkRequest, context):
+        """Compute Minjerk trajectory.""""
         return kin_pb.Trajectory(
             positions=minjerk(
                 initial_position=request.present_position.value,
@@ -385,6 +388,7 @@ class ReachySDKServer(Node,
         )
 
     def GetQuaternionTransform(self, request: orbita_pb.Point, context):
+        """Get quaternion from the given look at vector."""
         ros_req = GetQuatTf.Request()
         ros_req.point = Point(
             x=request.x,
@@ -454,6 +458,7 @@ class ReachySDKServer(Node,
         )
 
     def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+        """Compute movement given the requested commands in cartesian space."""
         left_arm_success = True
         right_arm_success = True
         orbita_head_success = True
@@ -519,6 +524,7 @@ class ReachySDKServer(Node,
         )
 
     def StreamCartesianCommands(self, request_iterator: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+        """Compute movement from stream of commands in cartesian space."""
         for request in request_iterator:
             self.SendCartesianCommand(request, context)
         return cart_pb.CartesianCommandAck()
