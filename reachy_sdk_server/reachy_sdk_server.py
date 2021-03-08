@@ -143,7 +143,6 @@ class ReachySDKServer(Node,
 
     def on_joint_states(self, joint_state: JointState) -> None:
         """Update joints position/velocity/effort on joint_state msg."""
-
         for i, name in enumerate(joint_state.name):
             if joint_state.position:
                 self.joints[name]['present_position'] = joint_state.position[i]
