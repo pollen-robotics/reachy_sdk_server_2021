@@ -350,7 +350,7 @@ class ReachySDKServer(Node,
         return load_msg
 
     def ComputeMinjerk(self, request: kin_pb.MinjerkRequest, context):
-        """Compute Minjerk trajectory.""""
+        """Compute Minjerk trajectory."""
         return kin_pb.Trajectory(
             positions=minjerk(
                 initial_position=request.present_position.value,
@@ -398,10 +398,10 @@ class ReachySDKServer(Node,
         resp = self.orbita_look_at_tf.call(ros_req)
         return orbita_pb.OrbitaTarget(
             q=orbita_pb.Quaternion(
-                    w= resp.quat.w,
-                    x= resp.quat.x,
-                    y= resp.quat.y,
-                    z= resp.quat.z,
+                    w=resp.quat.w,
+                    x=resp.quat.x,
+                    y=resp.quat.y,
+                    z=resp.quat.z,
                 )
             )
 
