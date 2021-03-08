@@ -165,7 +165,6 @@ class ReachySDKServer(Node,
 
     def on_joint_states(self, joint_state: msg.JointState) -> None:
         """Update joints position/velocity/effort on joint_state msg."""
-
         for i, name in enumerate(joint_state.name):
             if joint_state.position:
                 self.joints[name]['present_position'] = joint_state.position[i]
@@ -265,7 +264,7 @@ class ReachySDKServer(Node,
         return success
 
     def decode_img(self, msg, side):
-        """Callback for "/'side'_image "subscriber."""
+        """Get data from image. Callback for "/'side'_image "subscriber."""
         self.cam_img[side] = msg.data
 
     # Handle GRPCs
@@ -322,7 +321,7 @@ class ReachySDKServer(Node,
             last_pub = t
 
     def SendCommand(self, request: jc_pb.JointCommand, context) -> jc_pb.JointCommandAck:
-        """Handle new received command.
+        """Handle new received command for a single joint.
 
         Does not properly handle the async response success at the moment.
         """
@@ -330,10 +329,12 @@ class ReachySDKServer(Node,
         return jc_pb.JointCommandAck(success=success)
 
     def SendAllJointsCommand(self, request: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
+        """Handle commands for multiple joints."""
         success = self.handle_commands(request.commands)
         return jc_pb.JointCommandAck(success=success)
 
     def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
+        """Handle stream of commands for multiple joints."""
         success = True
         for request in request_iterator:
             resp = self.handle_commands(request.commands)
@@ -348,6 +349,7 @@ class ReachySDKServer(Node,
         return load_msg
 
     def ComputeMinjerk(self, request: kin_pb.MinjerkRequest, context):
+        """Compute Minjerk trajectory."""
         return kin_pb.Trajectory(
             positions=minjerk(
                 initial_position=request.present_position.value,
@@ -385,6 +387,7 @@ class ReachySDKServer(Node,
         )
 
     def GetQuaternionTransform(self, request: orbita_pb.Point, context):
+        """Get quaternion from the given look at vector."""
         ros_req = GetQuatTf.Request()
         ros_req.point = Point(
             x=request.x,
@@ -394,10 +397,10 @@ class ReachySDKServer(Node,
         resp = self.orbita_look_at_tf.call(ros_req)
         return orbita_pb.OrbitaTarget(
             q=orbita_pb.Quaternion(
-                    w= resp.quat.w,
-                    x= resp.quat.x,
-                    y= resp.quat.y,
-                    z= resp.quat.z,
+                    w=resp.quat.w,
+                    x=resp.quat.x,
+                    y=resp.quat.y,
+                    z=resp.quat.z,
                 )
             )
 
@@ -453,7 +456,12 @@ class ReachySDKServer(Node,
             ),
         )
 
-    def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+    def SendCartesianCommand(
+            self,
+            request: cart_pb.FullBodyCartesianCommand,
+            context,
+            ) -> cart_pb.CartesianCommandAck:
+        """Compute movement given the requested commands in cartesian space."""
         left_arm_success = True
         right_arm_success = True
         orbita_head_success = True
@@ -471,7 +479,7 @@ class ReachySDKServer(Node,
                 if resp.success:
                     goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
                 else:
-                    left_arm_success = False
+                    _ = False
 
             if request.HasField('right_arm_end_effector'):
                 request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
@@ -503,7 +511,7 @@ class ReachySDKServer(Node,
 
         for _ in range(100):
             if not t.is_alive():
-                success = True
+                _ = True
                 break
             time.sleep(0.001)
         else:
@@ -518,7 +526,12 @@ class ReachySDKServer(Node,
             orbita_head_success=orbita_head_success,
         )
 
-    def StreamCartesianCommands(self, request_iterator: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+    def StreamCartesianCommands(
+            self,
+            request_iterator: cart_pb.FullBodyCartesianCommand,
+            context,
+            ) -> cart_pb.CartesianCommandAck:
+        """Compute movement from stream of commands in cartesian space."""
         for request in request_iterator:
             self.SendCartesianCommand(request, context)
         return cart_pb.CartesianCommandAck()
@@ -529,14 +542,14 @@ class ReachySDKServer(Node,
         req = ZoomCommand.Request()
         req.side = request.side
         req.zoom_command = request.command
-        future = self.zoom_command_client.call_async(req)
+        _ = self.zoom_command_client.call_async(req)
         return zc_pb.Empty()
 
     def SetZoomSpeed(self, request, context):
         """Change zoom controller motors speed."""
         req = SetZoomSpeed.Request()
         req.speed = request.speed
-        future = self.zoom_speed_client.call_async(req)
+        _ = self.zoom_speed_client.call_async(req)
         return zc_pb.Empty()
 
 
