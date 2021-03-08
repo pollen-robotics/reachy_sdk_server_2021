@@ -335,7 +335,7 @@ class ReachySDKServer(Node,
 
         while True:
             sensors_state = self.GetSensorsState(request.request, context)
-            sensors_state['timestamp'].GetCurrentTime()
+            sensors_state.timestamp.GetCurrentTime()
 
             yield sensors_state
 
