@@ -19,21 +19,19 @@ import grpc
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import Point, Quaternion
+from geometry_msgs.msg import Point, Quaternion, Vector3
 from sensor_msgs.msg import JointState
 
 from reachy_msgs.msg import JointTemperature, ForceSensor
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy
 from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform
 
-from reachy_kinematics.utils import minjerk
-
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2, orbita_kinematics_pb2_grpc
-from reachy_sdk_api import kinematics_pb2, kinematics_pb2_grpc
+from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
-from reachy_sdk_api import cartesian_command_pb2, cartesian_command_pb2_grpc
+from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 
 
 from .utils import jointstate_pb_from_request
@@ -50,7 +48,7 @@ class ReachySDKServer(Node,
                       sensor_pb2_grpc.SensorServiceServicer,
                       orbita_kinematics_pb2_grpc.OrbitaKinematicsServicer,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
-                      cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
+                      fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -73,6 +71,7 @@ class ReachySDKServer(Node,
         self.force_sensors: Dict[str, float] = OrderedDict()
         self.setup()
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
+        self.names2ids = {name: i for i, name in enumerate(self.joints.keys())}
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
@@ -345,164 +344,194 @@ class ReachySDKServer(Node,
                 time.sleep(dt - elapsed_time)
             last_pub = t
 
-    # # Kinematics Service
-    # def ComputeOrbitaIK(self, request: orbita_kinematics_pb2.OrbitaIKRequest, context) -> orbita_kinematics_pb2.OrbitaIKSolution:
-    #     """Compute Orbita's disks positions for a requested quaternion."""
-    #     ros_req = GetOrbitaIK.Request()
-    #     ros_req.quat = Quaternion(
-    #         x=request.q.x,
-    #         y=request.q.y,
-    #         z=request.q.z,
-    #         w=request.q.w,
-    #     )
-    #     resp = self.orbita_ik.call(ros_req)
-    #     if not resp.success:
-    #         return orbita_kinematics_pb2.OrbitaIKSolution(success=False)
+    # Kinematics Service
+    def ComputeOrbitaIK(
+        self,
+        request: orbita_kinematics_pb2.OrbitaIKRequest,
+        context,
+    ) -> orbita_kinematics_pb2.OrbitaIKSolution:
+        """Compute Orbita's disks positions for a requested quaternion."""
+        ros_req = GetOrbitaIK.Request()
+        ros_req.orientation = Quaternion(
+            x=request.q.x,
+            y=request.q.y,
+            z=request.q.z,
+            w=request.q.w,
+        )
+        resp = self.orbita_ik.call(ros_req)
+        if not resp.success:
+            return orbita_kinematics_pb2.OrbitaIKSolution(success=False)
 
-    #     return orbita_kinematics_pb2.OrbitaIKSolution(
-    #         success=True,
-    #         sol=kinematics_pb2.JointsPosition(
-    #             disk_position=resp.disk_pos.position,
-    #         ),
-    #     )
+        return orbita_kinematics_pb2.OrbitaIKSolution(
+            success=True,
+            disk_position=kinematics_pb2.JointPosition(
+                ids=[joint_pb2.JointId(uid=self.names2ids[name]) for name in resp.disk_position.name],
+                positions=resp.disk_position.position,
+            ),
+        )
 
-    # def GetQuaternionTransform(self, request: orbita_kinematics_pb2.LookVector, context) -> kinematics_pb2.Quaternion:
-    #     ros_req = GetQuaternionTransform.Request()
-    #     ros_req.point = Point(
-    #         x=request.x,
-    #         y=request.y,
-    #         z=request.z,
-    #     )
-    #     resp = self.orbita_look_at_tf.call(ros_req)
-    #     return orbita_kinematics_pb2.OrbitaTarget(
-    #         q=orbita_kinematics_pb2.Quaternion(
-    #                 w=resp.quat.w,
-    #                 x=resp.quat.x,
-    #                 y=resp.quat.y,
-    #                 z=resp.quat.z,
-    #             )
-    #         )
+    def GetQuaternionTransform(self, request: orbita_kinematics_pb2.LookVector, context) -> kinematics_pb2.Quaternion:
+        """Get quaternion from the given look at vector."""
+        ros_req = GetQuaternionTransform.Request()
+        ros_req.look_vector = Vector3(
+            x=request.x,
+            y=request.y,
+            z=request.z,
+        )
+        resp = self.orbita_look_at_tf.call(ros_req)
+        return kinematics_pb2.Quaternion(
+            w=resp.orientation.w,
+            x=resp.orientation.x,
+            y=resp.orientation.y,
+            z=resp.orientation.z,
+        )
 
-    # def ComputeArmFK(self, request: arm_kinematics_pb2.ArmJointsPosition, context) -> arm_kinematics_pb2.ArmEndEffector:
-    #     """Compute forward kinematics for requested arm."""
-    #     fk_client = self.left_arm_fk if request.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_fk
+    def ComputeArmFK(self, request: arm_kinematics_pb2.ArmFKRequest, context) -> arm_kinematics_pb2.ArmFKSolution:
+        """Compute forward kinematics for requested arm."""
+        fk_client = self.left_arm_fk if request.arm_position.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_fk
 
-    #     req = GetArmFK.Request()
-    #     req.joint_position.position = request.positions.positions
+        req = GetArmFK.Request()
+        req.joint_position.position = request.positions.positions
 
-    #     resp = fk_client.call(req)
-    #     M = np.eye(4)
+        resp = fk_client.call(req)
+        M = np.eye(4)
 
-    #     p = resp.pose.position
-    #     M[:3, 3] = p.x, p.y, p.z
+        p = resp.pose.position
+        M[:3, 3] = p.x, p.y, p.z
 
-    #     q = resp.pose.orientation
-    #     M[:3, :3] = Rotation.from_quat((q.x, q.y, q.z, q.w)).as_matrix()
+        q = resp.pose.orientation
+        M[:3, :3] = Rotation.from_quat((q.x, q.y, q.z, q.w)).as_matrix()
 
-    #     return arm_kinematics_pb2.ArmEndEffector(
-    #         side=request.side,
-    #         target=kinematics_pb2.Matrix4x4(data=M.flatten()),
-    #     )
+        return arm_kinematics_pb2.ArmFKSolution(
+            success=True,
+            end_effector=arm_kinematics_pb2.ArmEndEffector(
+                side=request.arm_position.side,
+                pose=kinematics_pb2.Matrix4x4(data=M.flatten()),
+            ),
+        )
 
-    # def _call_arm_ik(self, request: arm_kinematics_pb2.ArmEndEffector):
-    #     ik_client = self.left_arm_ik if request.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_ik
+    def _call_arm_ik(self, request: arm_kinematics_pb2.ArmIKRequest) -> GetArmIK.Response:
+        ik_client = self.left_arm_ik if request.target.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_ik
 
-    #     ros_req = GetArmIK.Request()
-    #     M = np.array(request.target.data).reshape((4, 4))
+        ros_req = GetArmIK.Request()
+        M = np.array(request.target.pose.data).reshape((4, 4))
 
-    #     ros_req.pose.position = Point(x=M[0, 3], y=M[1, 3], z=M[2, 3])
-    #     q = Rotation.from_matrix(M[:3, :3]).as_quat()
-    #     ros_req.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+        ros_req.pose.position = Point(x=M[0, 3], y=M[1, 3], z=M[2, 3])
+        q = Rotation.from_matrix(M[:3, :3]).as_quat()
+        ros_req.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
 
-    #     if request.q0:
-    #         ros_req.q0.position = request.q0.positions
+        if request.q0:
+            ros_req.q0.position = request.q0.positions
 
-    #     return ik_client.call(ros_req)
+        return ik_client.call(ros_req)
 
-    # def ComputeArmIK(self, request: arm_kinematics_pb2.ArmEndEffector, context) -> arm_kinematics_pb2.ArmIKSolution:
-    #     """Compute inverse kinematics for requested arm."""
-    #     resp = self._call_arm_ik(request)
+    def ComputeArmIK(self, request: arm_kinematics_pb2.ArmIKRequest, context) -> arm_kinematics_pb2.ArmIKSolution:
+        """Compute inverse kinematics for requested arm."""
+        resp = self._call_arm_ik(request)
 
-    #     if not resp.success:
-    #         return arm_kinematics_pb2.ArmIKSolution(success=False)
+        if not resp.success:
+            return arm_kinematics_pb2.ArmIKSolution(success=False)
 
-    #     return arm_kinematics_pb2.ArmIKSolution(
-    #         success=True,
-    #         sol=arm_kinematics_pb2.ArmJointsPosition(
-    #             side=request.side,
-    #             positions=kinematics_pb2.JointsPosition(positions=resp.joint_position.position),
-    #         ),
-    #     )
+        return arm_kinematics_pb2.ArmIKSolution(
+            success=True,
+            arm_position=arm_kinematics_pb2.ArmJointPosition(
+                side=request.target.side,
+                positions=kinematics_pb2.JointPosition(
+                    ids=[joint_pb2.JointId(uid=self.names2ids[name]) for name in resp.joint_position.name],
+                    positions=resp.joint_position.position,
+                ),
+            ),
+        )
 
-    # def SendCartesianCommand(self, request: cartesian_command_pb2.FullBodyCartesianCommand, context) -> cartesian_command_pb2.CartesianCommandAck:
-    #     left_arm_success = True
-    #     right_arm_success = True
-    #     orbita_head_success = True
+    def SendCartesianCommand(
+        self,
+        request: fullbody_cartesian_command_pb2.FullBodyCartesianCommand,
+        context,
+    ) -> fullbody_cartesian_command_pb2.FullBodyCartesianCommandAck:
+        """Compute movement given the requested commands in cartesian space."""
+        left_arm_success = True
+        right_arm_success = True
+        orbita_head_success = True
 
-    #     running = threading.Event()
+        running = threading.Event()
 
-    #     def bg():
-    #         running.set()
+        def bg():
+            running.set()
 
-    #         goal_position = {}
+            goal_position = {}
 
-    #         if request.HasField('left_arm_end_effector'):
-    #             request.left_arm_end_effector.side = arm_kinematics_pb2.ArmSide.LEFT
-    #             resp = self._call_arm_ik(request.left_arm_end_effector)
-    #             if resp.success:
-    #                 goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
-    #             else:
-    #                 nonlocal left_arm_success
-    #                 left_arm_success = False
+            if request.HasField('left_arm'):
+                resp = self._call_arm_ik(request.left_arm)
+                if resp.success:
+                    goal_position.update(dict(zip(
+                        (self._joint_id_to_name(name) for name in resp.arm_position.positions.ids),
+                        resp.arm_position.positions.positions,
+                    )))
+                else:
+                    nonlocal left_arm_success
+                    left_arm_success = False
 
-    #         if request.HasField('right_arm_end_effector'):
-    #             request.right_arm_end_effector.side = arm_kinematics_pb2.ArmSide.RIGHT
-    #             resp = self._call_arm_ik(request.right_arm_end_effector)
-    #             if resp.success:
-    #                 goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
-    #             else:
-    #                 nonlocal right_arm_success
-    #                 right_arm_success = False
+            if request.HasField('right_arm'):
+                resp = self._call_arm_ik(request.right_arm)
+                if resp.success:
+                    goal_position.update(dict(zip(
+                        (self._joint_id_to_name(name) for name in resp.arm_position.positions.ids),
+                        resp.arm_position.positions.positions,
+                    )))
+                else:
+                    nonlocal right_arm_success
+                    right_arm_success = False
 
-    #         if request.HasField('orbita_target'):
-    #             resp = self.ComputeOrbitaIK(request.orbita_target, context)
-    #             if resp.success:
-    #                 disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
-    #                 goal_position.update(dict(zip(disks, resp.sol.positions)))
-    #             else:
-    #                 nonlocal orbita_head_success
-    #                 orbita_head_success = False
+            if request.HasField('neck'):
+                resp = self.ComputeOrbitaIK(request.neck, context)
+                if resp.success:
+                    goal_position.update(dict(zip(
+                        (self._joint_id_to_name(name) for name in resp.disk_position.positions.ids),
+                        resp.disk_position.positions.positions,
+                    )))
+                else:
+                    nonlocal orbita_head_success
+                    orbita_head_success = False
 
-    #         for name, pos in goal_position.items():
-    #             self.joints[name]['goal_position'] = pos
-    #         self.should_publish_position.set()
+            for name, pos in goal_position.items():
+                self.joints[name]['goal_position'] = pos
+            self.should_publish_position.set()
 
-    #     t = threading.Thread(target=bg)
-    #     t.daemon = True
-    #     t.start()
+        t = threading.Thread(target=bg)
+        t.daemon = True
+        t.start()
 
-    #     running.wait()
+        running.wait()
 
-    #     for _ in range(100):
-    #         if not t.is_alive():
-    #             break
-    #         time.sleep(0.001)
-    #     else:
-    #         self.logger.warning('ik service timeout!')
-    #         left_arm_success = False
-    #         right_arm_success = False
-    #         orbita_head_success = False
+        for _ in range(100):
+            if not t.is_alive():
+                break
+            time.sleep(0.001)
+        else:
+            self.logger.warning('ik service timeout!')
+            left_arm_success = False
+            right_arm_success = False
+            orbita_head_success = False
 
-    #     return cartesian_command_pb2.CartesianCommandAck(
-    #         left_arm_success=left_arm_success,
-    #         right_arm_success=right_arm_success,
-    #         orbita_head_success=orbita_head_success,
-    #     )
+        return fullbody_cartesian_command_pb2.FullBodyCartesianCommandAck(
+            left_arm_command_success=left_arm_success,
+            right_arm_command_success=right_arm_success,
+            neck_command_success=orbita_head_success,
+        )
 
-    # def StreamCartesianCommands(self, request_iterator: cartesian_command_pb2.FullBodyCartesianCommand, context) -> cartesian_command_pb2.CartesianCommandAck:
-    #     for request in request_iterator:
-    #         self.SendCartesianCommand(request, context)
-    #     return cartesian_command_pb2.CartesianCommandAck()
+    def StreamFullBodyCartesianCommands(
+        self,
+        request_iterator: Iterator[fullbody_cartesian_command_pb2.FullBodyCartesianCommand],
+        context,
+    ) -> fullbody_cartesian_command_pb2.FullBodyCartesianCommandAck:
+        """Compute movement from stream of commands in cartesian space."""
+        for request in request_iterator:
+            _ = self.SendCartesianCommand(request, context)
+        return fullbody_cartesian_command_pb2.FullBodyCartesianCommandAck(
+            left_arm_command_success=True,
+            right_arm_command_success=True,
+            neck_command_success=True,
+        )
 
 
 def main():
@@ -516,7 +545,7 @@ def main():
     sensor_pb2_grpc.add_SensorServiceServicer_to_server(sdk_server, server)
     orbita_kinematics_pb2_grpc.add_OrbitaKinematicsServicer_to_server(sdk_server, server)
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
-    cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
+    fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
