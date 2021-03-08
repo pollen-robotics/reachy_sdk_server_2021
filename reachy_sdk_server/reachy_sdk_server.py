@@ -297,7 +297,7 @@ class ReachySDKServer(Node,
 
         Does not properly handle the async response success at the moment.
         """
-        success = self.handle_commands([request.commands])
+        success = self.handle_commands(request.commands)
         return joint_pb2.JointCommandAck(success=success)
 
     def StreamJointsCommand(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
