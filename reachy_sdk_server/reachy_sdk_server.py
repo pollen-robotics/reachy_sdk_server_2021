@@ -256,7 +256,7 @@ class ReachySDKServer(Node,
         return joint_pb2.JointsId(names=names, uids=uids)
 
     def GetJointsState(self, request: joint_pb2.JointsStateRequest, context) -> joint_pb2.JointsState:
-        """Get the requested joints state."""
+        """Get the requested joints id."""
         params = {}
 
         params['ids'] = request.ids
@@ -272,7 +272,7 @@ class ReachySDKServer(Node,
 
         return joint_pb2.JointsState(**params)
 
-    def StreamAllJointsState(self, request: joint_pb2.StreamJointsRequest, context) -> Iterator[joint_pb2.JointsState]:
+    def StreamJointsState(self, request: joint_pb2.StreamJointsRequest, context) -> Iterator[joint_pb2.JointsState]:
         """Continuously stream requested joints up-to-date state."""
         dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
         last_pub = time.time()
@@ -282,7 +282,7 @@ class ReachySDKServer(Node,
             self.joint_states_pub_event.clear()
 
             joints_state = self.GetJointsState(request.request, context)
-            joints_state['timestamp'].GetCurrentTime()
+            joints_state.timestamp.GetCurrentTime()
 
             yield joints_state
 
@@ -301,6 +301,7 @@ class ReachySDKServer(Node,
         return joint_pb2.JointCommandAck(success=success)
 
     def StreamJointsCommand(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
+        """Handle stream of commands for multiple joints."""
         success = True
         for request in request_iterator:
             resp = self.handle_commands(request.commands)
@@ -310,6 +311,7 @@ class ReachySDKServer(Node,
 
     # Sensor Service
     def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
+        """Get all the force sensors id."""
         names, uids = zip(*enumerate(self.force_sensors.keys()))
         return sensor_pb2.SensorsId(names=names, uids=uids)
 
