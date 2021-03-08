@@ -457,10 +457,10 @@ class ReachySDKServer(Node,
         )
 
     def SendCartesianCommand(
-        self,
-        request: cart_pb.FullBodyCartesianCommand,
-        context,
-        ) -> cart_pb.CartesianCommandAck:
+            self,
+            request: cart_pb.FullBodyCartesianCommand,
+            context,
+            ) -> cart_pb.CartesianCommandAck:
         """Compute movement given the requested commands in cartesian space."""
         left_arm_success = True
         right_arm_success = True
@@ -527,10 +527,10 @@ class ReachySDKServer(Node,
         )
 
     def StreamCartesianCommands(
-        self,
-        request_iterator: cart_pb.FullBodyCartesianCommand,
-        context
-        ) -> cart_pb.CartesianCommandAck:
+            self,
+            request_iterator: cart_pb.FullBodyCartesianCommand,
+            context,
+            ) -> cart_pb.CartesianCommandAck:
         """Compute movement from stream of commands in cartesian space."""
         for request in request_iterator:
             self.SendCartesianCommand(request, context)
