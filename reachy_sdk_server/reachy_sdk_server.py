@@ -165,7 +165,6 @@ class ReachySDKServer(Node,
 
     def on_joint_states(self, joint_state: msg.JointState) -> None:
         """Update joints position/velocity/effort on joint_state msg."""
-
         for i, name in enumerate(joint_state.name):
             if joint_state.position:
                 self.joints[name]['present_position'] = joint_state.position[i]
@@ -265,7 +264,7 @@ class ReachySDKServer(Node,
         return success
 
     def decode_img(self, msg, side):
-        """Callback for "/'side'_image "subscriber."""
+        """Get data from image. Callback for "/'side'_image "subscriber."""
         self.cam_img[side] = msg.data
 
     # Handle GRPCs
@@ -457,7 +456,11 @@ class ReachySDKServer(Node,
             ),
         )
 
-    def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
+    def SendCartesianCommand(
+        self,
+        request: cart_pb.FullBodyCartesianCommand,
+        context,
+    ) -> cart_pb.CartesianCommandAck:
         """Compute movement given the requested commands in cartesian space."""
         left_arm_success = True
         right_arm_success = True
@@ -476,7 +479,7 @@ class ReachySDKServer(Node,
                 if resp.success:
                     goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
                 else:
-                    left_arm_success = False
+                    _ = False
 
             if request.HasField('right_arm_end_effector'):
                 request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
@@ -508,7 +511,7 @@ class ReachySDKServer(Node,
 
         for _ in range(100):
             if not t.is_alive():
-                success = True
+                _ = True
                 break
             time.sleep(0.001)
         else:
@@ -535,14 +538,14 @@ class ReachySDKServer(Node,
         req = ZoomCommand.Request()
         req.side = request.side
         req.zoom_command = request.command
-        future = self.zoom_command_client.call_async(req)
+        _ = self.zoom_command_client.call_async(req)
         return zc_pb.Empty()
 
     def SetZoomSpeed(self, request, context):
         """Change zoom controller motors speed."""
         req = SetZoomSpeed.Request()
         req.speed = request.speed
-        future = self.zoom_speed_client.call_async(req)
+        _ = self.zoom_speed_client.call_async(req)
         return zc_pb.Empty()
 
 
