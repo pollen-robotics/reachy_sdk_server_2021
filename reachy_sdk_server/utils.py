@@ -7,7 +7,7 @@ from google.protobuf.wrappers_pb2 import BoolValue, FloatValue
 from reachy_sdk_api.joint_pb2 import JointField, JointState
 
 
-def parse_fields(fields: List[JointField]) -> List[int]:
+def parse_fields(fields: List) -> List[int]:
     """Parse JointField (handles NONE, ALL specific cases)."""
     if JointField.NONE in fields:
         return []

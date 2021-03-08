@@ -40,18 +40,17 @@ from .utils import jointstate_pb_from_request
 
 
 proto_arm_side_to_str = {
-    armk_pb.ArmSide.LEFT: 'left',
-    armk_pb.ArmSide.RIGHT: 'right',
+    arm_kinematics_pb2.ArmSide.LEFT: 'left',
+    arm_kinematics_pb2.ArmSide.RIGHT: 'right',
 }
 
 
 class ReachySDKServer(Node,
-                      joint_pb2_grpc.JointStateServiceServicer,
-                      sensor_pb2_grpc.LoadServiceServicer,
-                      orbita_kinematics_pb2_grpc.OrbitaKinematicServicer,
-                      arm_kinematics_pb2_grpc.ArmKinematicServicer,
-                      cartesian_command_pb2_grpc.CartesianCommandServiceServicer,
-                      kinematics_pb2_grpc.KinematicsServiceServicer,
+                      joint_pb2_grpc.JointServiceServicer,
+                      sensor_pb2_grpc.SensorServiceServicer,
+                      orbita_kinematics_pb2_grpc.OrbitaKinematicsServicer,
+                      arm_kinematics_pb2_grpc.ArmKinematicsServicer,
+                      cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -63,12 +62,12 @@ class ReachySDKServer(Node,
 
         """
         super().__init__(node_name=node_name)
+        self.logger = self.get_logger()
+
+        self.clock = self.get_clock()
 
         self.timeout_sec = timeout_sec
         self.pub_period = 1 / pub_frequency
-
-        self.clock = self.get_clock()
-        self.logger = self.get_logger()
 
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
         self.force_sensors: Dict[str, float] = OrderedDict()
@@ -78,11 +77,11 @@ class ReachySDKServer(Node,
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
 
+        self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
             msg_type=JointState, topic='joint_states',
             callback=self.on_joint_states, qos_profile=5,
         )
-        self.joint_states_pub_event = threading.Event()
 
         self.joint_temperatures_sub = self.create_subscription(
             msg_type=JointTemperature, topic='joint_temperatures',
@@ -151,7 +150,7 @@ class ReachySDKServer(Node,
             if joint_state.effort:
                 self.joints[name]['present_load'] = joint_state.effort[i]
 
-        self.joint_state_pub_event.set()
+        self.joint_states_pub_event.set()
 
     def on_joint_temperatures(self, joint_temperature: JointTemperature) -> None:
         """Update joints temperature on joint_temperature msg."""
@@ -279,8 +278,8 @@ class ReachySDKServer(Node,
         last_pub = time.time()
 
         while True:
-            self.joint_state_pub_event.wait()
-            self.joint_state_pub_event.clear()
+            self.joint_states_pub_event.wait()
+            self.joint_states_pub_event.clear()
 
             joints_state = self.GetJointsState(request.request, context)
             joints_state['timestamp'].GetCurrentTime()
@@ -513,10 +512,9 @@ def main():
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10))
     joint_pb2_grpc.add_JointServiceServicer_to_server(sdk_server, server)
     sensor_pb2_grpc.add_SensorServiceServicer_to_server(sdk_server, server)
-    orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
-    arm_kinematics_pb2_grpc.add_ArmKinematicServicer_to_server(sdk_server, server)
-    cartesian_command_pb2_grpc.add_CartesianCommandServiceServicer_to_server(sdk_server, server)
-    kinematics_pb2_grpc.add_KinematicsServiceServicer_to_server(sdk_server, server)
+    orbita_kinematics_pb2_grpc.add_OrbitaKinematicsServicer_to_server(sdk_server, server)
+    arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
+    cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
