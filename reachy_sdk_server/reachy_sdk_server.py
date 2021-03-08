@@ -2,11 +2,10 @@
 
 import threading
 import time
+
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Iterator, List
-from threading import Event
-from functools import partial
 
 import numpy as np
 
@@ -20,45 +19,38 @@ import grpc
 import rclpy
 from rclpy.node import Node
 
-from reachy_msgs.msg import JointTemperature, LoadSensor
-from reachy_msgs.srv import GetJointsFullState, SetCompliant
-from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform as GetQuatTf
-from reachy_msgs.srv import ZoomCommand, SetZoomSpeed
-
-from reachy_sdk_api import joint_command_pb2 as jc_pb, joint_command_pb2_grpc
-from reachy_sdk_api import joint_state_pb2 as js_pb, joint_state_pb2_grpc
-from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
-from reachy_sdk_api import load_sensor_pb2 as ls_pb, load_sensor_pb2_grpc
-from reachy_sdk_api import orbita_kinematics_pb2 as orbita_pb, orbita_kinematics_pb2_grpc
-from reachy_sdk_api import kinematics_pb2 as kin_pb, kinematics_pb2_grpc
-from reachy_sdk_api import arm_kinematics_pb2 as armk_pb, arm_kinematics_pb2_grpc
-from reachy_sdk_api import cartesian_command_pb2 as cart_pb, cartesian_command_pb2_grpc
-from reachy_sdk_api import zoom_command_pb2 as zc_pb, zoom_command_pb2_grpc
-
-from sensor_msgs import msg
-from sensor_msgs.msg._compressed_image import CompressedImage
 from geometry_msgs.msg import Point, Quaternion
+from sensor_msgs.msg import JointState
 
-from reachy_arm_kinematics.utils import minjerk
+from reachy_msgs.msg import JointTemperature, ForceSensor
+from reachy_msgs.srv import GetJointFullState, SetJointCompliancy
+from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform
+
+from reachy_kinematics.utils import minjerk
+
+from reachy_sdk_api import joint_pb2, joint_pb2_grpc
+from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
+from reachy_sdk_api import orbita_kinematics_pb2, orbita_kinematics_pb2_grpc
+from reachy_sdk_api import kinematics_pb2, kinematics_pb2_grpc
+from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
+from reachy_sdk_api import cartesian_command_pb2, cartesian_command_pb2_grpc
+
 
 from .utils import jointstate_pb_from_request
 
 
-protoside_to_str = {
+proto_arm_side_to_str = {
     armk_pb.ArmSide.LEFT: 'left',
     armk_pb.ArmSide.RIGHT: 'right',
 }
 
 
 class ReachySDKServer(Node,
-                      joint_state_pb2_grpc.JointStateServiceServicer,
-                      joint_command_pb2_grpc.JointCommandServiceServicer,
-                      camera_reachy_pb2_grpc.CameraServiceServicer,
-                      load_sensor_pb2_grpc.LoadServiceServicer,
+                      joint_pb2_grpc.JointStateServiceServicer,
+                      sensor_pb2_grpc.LoadServiceServicer,
                       orbita_kinematics_pb2_grpc.OrbitaKinematicServicer,
                       arm_kinematics_pb2_grpc.ArmKinematicServicer,
                       cartesian_command_pb2_grpc.CartesianCommandServiceServicer,
-                      zoom_command_pb2_grpc.ZoomControllerServiceServicer,
                       kinematics_pb2_grpc.KinematicsServiceServicer,
                       ):
     """Reachy SDK server node."""
@@ -66,8 +58,8 @@ class ReachySDKServer(Node,
     def __init__(self, node_name: str, timeout_sec: float = 5, pub_frequency: float = 100) -> None:
         """Set up the node.
 
-        Subscribe to /joint_state, /joint_temp, /force_gripper.
-        Publish new command on /joint_goal or concerned services.
+        Subscribe to /joint_states, /joint_temperatures, /force_sensors.
+        Publish new command on /joint_goals or concerned services.
 
         """
         super().__init__(node_name=node_name)
@@ -79,70 +71,56 @@ class ReachySDKServer(Node,
         self.logger = self.get_logger()
 
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
-        self.load_sensors: Dict[str, float] = OrderedDict()
+        self.force_sensors: Dict[str, float] = OrderedDict()
         self.setup()
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
 
         self.logger.info('Launching pub/sub/srv...')
-        self.compliant_client = self.create_client(SetCompliant, 'set_compliant')
-        self.zoom_command_client = self.create_client(ZoomCommand, 'zoom_command')
-        self.zoom_speed_client = self.create_client(SetZoomSpeed, 'zoom_speed')
+        self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
 
         self.joint_states_sub = self.create_subscription(
-            msg_type=msg.JointState, topic='joint_states',
+            msg_type=JointState, topic='joint_states',
             callback=self.on_joint_states, qos_profile=5,
         )
-        self.joint_state_pub_event = Event()
+        self.joint_states_pub_event = threading.Event()
+
         self.joint_temperatures_sub = self.create_subscription(
             msg_type=JointTemperature, topic='joint_temperatures',
             callback=self.on_joint_temperatures, qos_profile=5,
         )
-        self.load_sensor_sub = self.create_subscription(
-            msg_type=LoadSensor, topic='force_gripper',
-            callback=self.on_load_sensors, qos_profile=5,
-        )
-        self.joint_goals_pub = self.create_publisher(
-            msg_type=msg.JointState, topic='joint_goals', qos_profile=5,
-        )
-        self.should_publish_position = Event()
-        self.should_publish_velocity = Event()
-        self.should_publish_effort = Event()
 
+        self.force_sensor_sub = self.create_subscription(
+            msg_type=ForceSensor, topic='force_sensors',
+            callback=self.on_force_sensors, qos_profile=5,
+        )
+
+        self.joint_goals_pub = self.create_publisher(
+            msg_type=JointState, topic='joint_goals', qos_profile=5,
+        )
+        self.should_publish_position = threading.Event()
+        self.should_publish_velocity = threading.Event()
+        self.should_publish_effort = threading.Event()
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
 
-        self.left_cam_sub = self.create_subscription(
-            CompressedImage,
-            'left_image',
-            partial(self.decode_img, side='left'),
-            1)
-        self.right_cam_sub = self.create_subscription(
-            CompressedImage,
-            'right_image',
-            partial(self.decode_img, side='right'),
-            1)
-        self.cam_img = {
-            'left': None,
-            'right': None
-        }
-
         # Kinematics
-        self.left_arm_fk = self.create_client(GetArmFK, '/reachy_left_arm_kinematics_service/forward')
-        self.left_arm_ik = self.create_client(GetArmIK, '/reachy_left_arm_kinematics_service/inverse')
-        self.right_arm_fk = self.create_client(GetArmFK, '/reachy_right_arm_kinematics_service/forward')
-        self.right_arm_ik = self.create_client(GetArmIK, '/reachy_right_arm_kinematics_service/inverse')
-        self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita_ik')
-        self.orbita_look_at_tf = self.create_client(GetQuatTf, '/orbita_look_at_tf')
+        self.left_arm_fk = self.create_client(GetArmFK, '/left_arm/kinematics/forward')
+        self.left_arm_ik = self.create_client(GetArmIK, '/left_arm/kinematics/inverse')
+        self.right_arm_fk = self.create_client(GetArmFK, '/right_arm/kinematics/forward')
+        self.right_arm_ik = self.create_client(GetArmIK, '/right_arm/kinematics/inverse')
+        self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita/kinematics/inverse')
+        self.orbita_look_at_tf = self.create_client(GetQuaternionTransform, '/orbita/kinematics/look_vector_to_quaternion')
+
         self.logger.info('SDK ready to be served!')
 
     def setup(self) -> None:
-        """Set up the joints values, retrieve all init info using GetJointsFullState srv."""
+        """Set up the joints values, retrieve all init info using GetJointFullState srv."""
         self.logger.info('Getting all joints initial configuration...')
 
         joint_fullstate_client = self.create_client(
-            srv_type=GetJointsFullState, srv_name='get_joint_full_state',
+            srv_type=GetJointFullState, srv_name='get_joint_full_state',
         )
         joint_fullstate_client.wait_for_service(timeout_sec=self.timeout_sec)
-        fut = joint_fullstate_client.call_async(GetJointsFullState.Request())
+        fut = joint_fullstate_client.call_async(GetJointFullState.Request())
         rclpy.spin_until_future_complete(self, fut)
         full_state_resp = fut.result()
 
@@ -163,7 +141,7 @@ class ReachySDKServer(Node,
                 'torque_limit': full_state_resp.torque_limit[i],
             }
 
-    def on_joint_states(self, joint_state: msg.JointState) -> None:
+    def on_joint_states(self, joint_state: JointState) -> None:
         """Update joints position/velocity/effort on joint_state msg."""
 
         for i, name in enumerate(joint_state.name):
@@ -181,10 +159,10 @@ class ReachySDKServer(Node,
         for name, temp in zip(joint_temperature.name, joint_temperature.temperature):
             self.joints[name]['temperature'] = temp.temperature
 
-    def on_load_sensors(self, load_sensor: LoadSensor) -> None:
+    def on_force_sensors(self, force_sensor: ForceSensor) -> None:
         """Update load sensor value on load_sensor msg."""
-        for side, load in zip(load_sensor.side, load_sensor.load_value):
-            self.load_sensors[side] = load
+        for name, force in zip(force_sensor.name, force_sensor.force):
+            self.force_sensors[name] = force
 
     def on_joint_goals_publish(self) -> None:
         """Publish position/velocity/effort on joint_goals.
@@ -196,7 +174,7 @@ class ReachySDKServer(Node,
             self.should_publish_velocity.is_set(),
             self.should_publish_effort.is_set(),
         )):
-            joint_goals = msg.JointState()
+            joint_goals = JointState()
             joint_goals.header.stamp = self.clock.now().to_msg()
             joint_goals.name = self.joints.keys()
 
@@ -214,7 +192,15 @@ class ReachySDKServer(Node,
 
             self.joint_goals_pub.publish(joint_goals)
 
-    def handle_commands(self, commands: List[jc_pb.JointCommand]) -> bool:
+    def _joint_id_to_name(self, joint_id: joint_pb2.JointId) -> str:
+        if joint_id.HasField('name'):
+            return joint_id.name
+        elif joint_id.HasField('uid'):
+            return self.id2names[joint_id.uid]
+        else:
+            raise ValueError(f'Unknown joint_id {joint_id}!')
+
+    def handle_commands(self, commands: List[joint_pb2.JointCommand]) -> bool:
         """Handle new received commands."""
         success = True
 
@@ -222,12 +208,12 @@ class ReachySDKServer(Node,
         names, values = [], []
         for cmd in commands:
             if cmd.HasField('compliant'):
-                names.append(self.id2names[cmd.id])
+                names.append(self._joint_id_to_name(cmd.id))
                 values.append(cmd.compliant.value)
         if names:
-            request = SetCompliant.Request()
+            request = SetJointCompliancy.Request()
             request.name = names
-            request.compliant = values
+            request.compliancy = values
 
             # TODO: Should be re-written using asyncio
             future = self.compliant_client.call_async(request)
@@ -241,7 +227,7 @@ class ReachySDKServer(Node,
 
         use_goal_pos, use_goal_vel, use_goal_eff = False, False, False
         for cmd in commands:
-            name = self.id2names[cmd.id]
+            name = self._joint_id_to_name(cmd.id)
 
             if cmd.HasField('goal_position'):
                 self.joints[name]['goal_position'] = cmd.goal_position.value
@@ -264,56 +250,43 @@ class ReachySDKServer(Node,
 
         return success
 
-    def decode_img(self, msg, side):
-        """Callback for "/'side'_image "subscriber."""
-        self.cam_img[side] = msg.data
-
     # Handle GRPCs
-    def GetAllJointNames(self, request: Empty, context) -> js_pb.JointNames:
+    # Joint Service
+    def GetAllJointsId(self, request: Empty, context) -> joint_pb2.JointsId:
         """Get all the joints name."""
-        return js_pb.JointNames(names=self.joints.keys())
+        uids, names = zip(*enumerate(self.joints.keys()))
+        return joint_pb2.JointsId(names=names, uids=uids)
 
-    def GetJointState(self, request: js_pb.JointRequest, context) -> js_pb.JointState:
-        """Get the requested joint state."""
-        joint = self.joints[request.name]
-        fields = request.requested_fields
+    def GetJointsState(self, request: joint_pb2.JointsStateRequest, context) -> joint_pb2.JointsState:
+        """Get the requested joints state."""
+        params = {}
 
-        return jointstate_pb_from_request(joint, fields, timestamp=True)
+        params['ids'] = request.ids
+        params['states'] = [
+            jointstate_pb_from_request(
+                self.joints[self._joint_id_to_name(id)],
+                request.requested_fields,
+            )
+            for id in request.ids
+        ]
+        params['timestamp'] = Timestamp()
+        params['timestamp'].GetCurrentTime()
 
-    def GetAllJointsState(self, request: js_pb.AllJointsRequest, context) -> js_pb.AllJointsState:
-        """Get all requested joints states."""
-        fields = request.requested_fields
+        return joint_pb2.JointsState(**params)
 
-        params = {
-            'joints': [
-                jointstate_pb_from_request(joint, fields, timestamp=True)
-                for joint in self.joints.values()
-            ],
-        }
-        return js_pb.AllJointsState(**params)
-
-    def StreamAllJointsState(self, request: js_pb.StreamAllJointsRequest, context) -> Iterator[js_pb.AllJointsState]:
-        """Continuously stream all joints up-to-date state."""
+    def StreamAllJointsState(self, request: joint_pb2.StreamJointsRequest, context) -> Iterator[joint_pb2.JointsState]:
+        """Continuously stream requested joints up-to-date state."""
         dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
         last_pub = time.time()
-
-        fields = request.requested_fields
-        timestamp = Timestamp()
 
         while True:
             self.joint_state_pub_event.wait()
             self.joint_state_pub_event.clear()
 
-            timestamp.GetCurrentTime()
+            joints_state = self.GetJointsState(request.request, context)
+            joints_state['timestamp'].GetCurrentTime()
 
-            params = {
-                'joints': [
-                    jointstate_pb_from_request(joint, fields, timestamp=False)
-                    for joint in self.joints.values()
-                ],
-                'timestamp': timestamp,
-            }
-            yield js_pb.AllJointsState(**params)
+            yield joints_state
 
             t = time.time()
             elapsed_time = t - last_pub
@@ -321,223 +294,215 @@ class ReachySDKServer(Node,
                 time.sleep(dt - elapsed_time)
             last_pub = t
 
-    def SendCommand(self, request: jc_pb.JointCommand, context) -> jc_pb.JointCommandAck:
-        """Handle new received command.
+    def SendCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointCommandAck:
+        """Handle new received commands.
 
         Does not properly handle the async response success at the moment.
         """
-        success = self.handle_commands([request])
-        return jc_pb.JointCommandAck(success=success)
+        success = self.handle_commands([request.commands])
+        return joint_pb2.JointCommandAck(success=success)
 
-    def SendAllJointsCommand(self, request: jc_pb.MultipleJointsCommand, context) -> jc_pb.JointCommandAck:
-        success = self.handle_commands(request.commands)
-        return jc_pb.JointCommandAck(success=success)
-
-    def StreamJointsCommand(self, request_iterator: Iterator[jc_pb.MultipleJointsCommand], context) -> jc_pb.JointCommandAck:
+    def StreamJointsCommand(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
         success = True
         for request in request_iterator:
             resp = self.handle_commands(request.commands)
             if not resp:
                 success = False
-        return jc_pb.JointCommandAck(success=success)
+        return joint_pb2.JointCommandAck(success=success)
 
-    def GetLoad(self, request: ls_pb.LoadValue, context):
-        """Get the requested load value."""
-        load_msg = ls_pb.LoadValue()
-        load_msg.load = self.load_sensors[request.side]
-        return load_msg
+    # Sensor Service
+    def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
+        names, uids = zip(*enumerate(self.force_sensors.keys()))
+        return sensor_pb2.SensorsId(names=names, uids=uids)
 
-    def ComputeMinjerk(self, request: kin_pb.MinjerkRequest, context):
-        return kin_pb.Trajectory(
-            positions=minjerk(
-                initial_position=request.present_position.value,
-                goal_position=request.goal_position.value,
-                duration=request.duration.value
-            )
-        )
+    def GetSensorsState(self, request: sensor_pb2.SensorsStateRequest, context) -> sensor_pb2.SensorsState:
+        """Get the requested sensors value."""
+        forces = list(self.force_sensors.values())
 
-    # Camera GRPC
-    def GetImage(self, request, context):
-        """Get the image from the requested camera topic."""
-        im_msg = cam_pb.Image()
-        im_msg.data = self.cam_img[request.side].tobytes()
-        return im_msg
+        params = {}
+        params['ids'] = request.ids
+        params['states'] = [
+            sensor_pb2.SensorState(force_sensor_state=sensor_pb2.ForceSensorState(force=forces[id]))
+            for id in request.ids
+        ]
 
-    # Orbita GRPC
-    def ComputeOrbitaIK(self, request: orbita_pb.OrbitaTarget, context) -> orbita_pb.OrbitaIKSolution:
-        """Compute Orbita's disks positions for a requested quaternion."""
-        ros_req = GetOrbitaIK.Request()
-        ros_req.quat = Quaternion(
-            x=request.q.x,
-            y=request.q.y,
-            z=request.q.z,
-            w=request.q.w,
-            )
-        resp = self.orbita_ik.call(ros_req)
-        if not resp.success:
-            return orbita_pb.OrbitaIKSolution(success=False)
+        return sensor_pb2.SensorState(**params)
 
-        return orbita_pb.OrbitaIKSolution(
-            success=True,
-            sol=kin_pb.JointsPosition(
-                positions=resp.disk_pos.position,
-            ),
-        )
+    def StreamSensorStates(self, request: sensor_pb2.StreamSensorsStateRequest, context) -> Iterator[sensor_pb2.SensorsState]:
+        """Continuously stream requested sensors up-to-date value."""
+        dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
+        last_pub = time.time()
 
-    def GetQuaternionTransform(self, request: orbita_pb.Point, context):
-        ros_req = GetQuatTf.Request()
-        ros_req.point = Point(
-            x=request.x,
-            y=request.y,
-            z=request.z,
-        )
-        resp = self.orbita_look_at_tf.call(ros_req)
-        return orbita_pb.OrbitaTarget(
-            q=orbita_pb.Quaternion(
-                    w= resp.quat.w,
-                    x= resp.quat.x,
-                    y= resp.quat.y,
-                    z= resp.quat.z,
-                )
-            )
+        while True:
+            sensors_state = self.GetSensorsState(request.request, context)
+            sensors_state['timestamp'].GetCurrentTime()
 
-    # Arm kinematics GRPC
-    def ComputeArmFK(self, request: armk_pb.ArmJointsPosition, context) -> armk_pb.ArmEndEffector:
-        """Compute forward kinematics for requested arm."""
-        fk_client = self.left_arm_fk if request.side == armk_pb.ArmSide.LEFT else self.right_arm_fk
+            yield sensors_state
 
-        req = GetArmFK.Request()
-        req.joint_position.position = request.positions.positions
+            t = time.time()
+            elapsed_time = t - last_pub
+            if elapsed_time < dt:
+                time.sleep(dt - elapsed_time)
+            last_pub = t
 
-        resp = fk_client.call(req)
-        M = np.eye(4)
+    # # Kinematics Service
+    # def ComputeOrbitaIK(self, request: orbita_kinematics_pb2.OrbitaIKRequest, context) -> orbita_kinematics_pb2.OrbitaIKSolution:
+    #     """Compute Orbita's disks positions for a requested quaternion."""
+    #     ros_req = GetOrbitaIK.Request()
+    #     ros_req.quat = Quaternion(
+    #         x=request.q.x,
+    #         y=request.q.y,
+    #         z=request.q.z,
+    #         w=request.q.w,
+    #     )
+    #     resp = self.orbita_ik.call(ros_req)
+    #     if not resp.success:
+    #         return orbita_kinematics_pb2.OrbitaIKSolution(success=False)
 
-        p = resp.pose.position
-        M[:3, 3] = p.x, p.y, p.z
+    #     return orbita_kinematics_pb2.OrbitaIKSolution(
+    #         success=True,
+    #         sol=kinematics_pb2.JointsPosition(
+    #             disk_position=resp.disk_pos.position,
+    #         ),
+    #     )
 
-        q = resp.pose.orientation
-        M[:3, :3] = Rotation.from_quat((q.x, q.y, q.z, q.w)).as_matrix()
+    # def GetQuaternionTransform(self, request: orbita_kinematics_pb2.LookVector, context) -> kinematics_pb2.Quaternion:
+    #     ros_req = GetQuaternionTransform.Request()
+    #     ros_req.point = Point(
+    #         x=request.x,
+    #         y=request.y,
+    #         z=request.z,
+    #     )
+    #     resp = self.orbita_look_at_tf.call(ros_req)
+    #     return orbita_kinematics_pb2.OrbitaTarget(
+    #         q=orbita_kinematics_pb2.Quaternion(
+    #                 w=resp.quat.w,
+    #                 x=resp.quat.x,
+    #                 y=resp.quat.y,
+    #                 z=resp.quat.z,
+    #             )
+    #         )
 
-        return armk_pb.ArmEndEffector(
-            side=request.side,
-            target=kin_pb.Matrix4x4(data=M.flatten()),
-        )
+    # def ComputeArmFK(self, request: arm_kinematics_pb2.ArmJointsPosition, context) -> arm_kinematics_pb2.ArmEndEffector:
+    #     """Compute forward kinematics for requested arm."""
+    #     fk_client = self.left_arm_fk if request.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_fk
 
-    def _call_arm_ik(self, request: armk_pb.ArmEndEffector):
-        ik_client = self.left_arm_ik if request.side == armk_pb.ArmSide.LEFT else self.right_arm_ik
+    #     req = GetArmFK.Request()
+    #     req.joint_position.position = request.positions.positions
 
-        ros_req = GetArmIK.Request()
-        M = np.array(request.target.data).reshape((4, 4))
+    #     resp = fk_client.call(req)
+    #     M = np.eye(4)
 
-        ros_req.pose.position = Point(x=M[0, 3], y=M[1, 3], z=M[2, 3])
-        q = Rotation.from_matrix(M[:3, :3]).as_quat()
-        ros_req.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+    #     p = resp.pose.position
+    #     M[:3, 3] = p.x, p.y, p.z
 
-        if request.q0:
-            ros_req.q0.position = request.q0.positions
+    #     q = resp.pose.orientation
+    #     M[:3, :3] = Rotation.from_quat((q.x, q.y, q.z, q.w)).as_matrix()
 
-        return ik_client.call(ros_req)
+    #     return arm_kinematics_pb2.ArmEndEffector(
+    #         side=request.side,
+    #         target=kinematics_pb2.Matrix4x4(data=M.flatten()),
+    #     )
 
-    def ComputeArmIK(self, request: armk_pb.ArmEndEffector, context) -> armk_pb.ArmIKSolution:
-        """Compute inverse kinematics for requested arm."""
-        resp = self._call_arm_ik(request)
+    # def _call_arm_ik(self, request: arm_kinematics_pb2.ArmEndEffector):
+    #     ik_client = self.left_arm_ik if request.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_ik
 
-        if not resp.success:
-            return armk_pb.ArmIKSolution(success=False)
+    #     ros_req = GetArmIK.Request()
+    #     M = np.array(request.target.data).reshape((4, 4))
 
-        return armk_pb.ArmIKSolution(
-            success=True,
-            sol=armk_pb.ArmJointsPosition(
-                side=request.side,
-                positions=kin_pb.JointsPosition(positions=resp.joint_position.position),
-            ),
-        )
+    #     ros_req.pose.position = Point(x=M[0, 3], y=M[1, 3], z=M[2, 3])
+    #     q = Rotation.from_matrix(M[:3, :3]).as_quat()
+    #     ros_req.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
 
-    def SendCartesianCommand(self, request: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
-        left_arm_success = True
-        right_arm_success = True
-        orbita_head_success = True
+    #     if request.q0:
+    #         ros_req.q0.position = request.q0.positions
 
-        running = Event()
+    #     return ik_client.call(ros_req)
 
-        def bg():
-            running.set()
+    # def ComputeArmIK(self, request: arm_kinematics_pb2.ArmEndEffector, context) -> arm_kinematics_pb2.ArmIKSolution:
+    #     """Compute inverse kinematics for requested arm."""
+    #     resp = self._call_arm_ik(request)
 
-            goal_position = {}
+    #     if not resp.success:
+    #         return arm_kinematics_pb2.ArmIKSolution(success=False)
 
-            if request.HasField('left_arm_end_effector'):
-                request.left_arm_end_effector.side = armk_pb.ArmSide.LEFT
-                resp = self._call_arm_ik(request.left_arm_end_effector)
-                if resp.success:
-                    goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
-                else:
-                    left_arm_success = False
+    #     return arm_kinematics_pb2.ArmIKSolution(
+    #         success=True,
+    #         sol=arm_kinematics_pb2.ArmJointsPosition(
+    #             side=request.side,
+    #             positions=kinematics_pb2.JointsPosition(positions=resp.joint_position.position),
+    #         ),
+    #     )
 
-            if request.HasField('right_arm_end_effector'):
-                request.right_arm_end_effector.side = armk_pb.ArmSide.RIGHT
-                resp = self._call_arm_ik(request.right_arm_end_effector)
-                if resp.success:
-                    goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
-                else:
-                    nonlocal right_arm_success
-                    right_arm_success = False
+    # def SendCartesianCommand(self, request: cartesian_command_pb2.FullBodyCartesianCommand, context) -> cartesian_command_pb2.CartesianCommandAck:
+    #     left_arm_success = True
+    #     right_arm_success = True
+    #     orbita_head_success = True
 
-            if request.HasField('orbita_target'):
-                resp = self.ComputeOrbitaIK(request.orbita_target, context)
-                if resp.success:
-                    disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
-                    goal_position.update(dict(zip(disks, resp.sol.positions)))
-                else:
-                    nonlocal orbita_head_success
-                    orbita_head_success = False
+    #     running = threading.Event()
 
-            for name, pos in goal_position.items():
-                self.joints[name]['goal_position'] = pos
-            self.should_publish_position.set()
+    #     def bg():
+    #         running.set()
 
-        t = threading.Thread(target=bg)
-        t.daemon = True
-        t.start()
+    #         goal_position = {}
 
-        running.wait()
+    #         if request.HasField('left_arm_end_effector'):
+    #             request.left_arm_end_effector.side = arm_kinematics_pb2.ArmSide.LEFT
+    #             resp = self._call_arm_ik(request.left_arm_end_effector)
+    #             if resp.success:
+    #                 goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+    #             else:
+    #                 nonlocal left_arm_success
+    #                 left_arm_success = False
 
-        for _ in range(100):
-            if not t.is_alive():
-                success = True
-                break
-            time.sleep(0.001)
-        else:
-            self.logger.warning('ik service timeout!')
-            left_arm_success = False
-            right_arm_success = False
-            orbita_head_success = False
+    #         if request.HasField('right_arm_end_effector'):
+    #             request.right_arm_end_effector.side = arm_kinematics_pb2.ArmSide.RIGHT
+    #             resp = self._call_arm_ik(request.right_arm_end_effector)
+    #             if resp.success:
+    #                 goal_position.update(dict(zip(resp.joint_position.name, resp.joint_position.position)))
+    #             else:
+    #                 nonlocal right_arm_success
+    #                 right_arm_success = False
 
-        return cart_pb.CartesianCommandAck(
-            left_arm_success=left_arm_success,
-            right_arm_success=right_arm_success,
-            orbita_head_success=orbita_head_success,
-        )
+    #         if request.HasField('orbita_target'):
+    #             resp = self.ComputeOrbitaIK(request.orbita_target, context)
+    #             if resp.success:
+    #                 disks = ['neck_disk_top', 'neck_disk_middle', 'neck_disk_bottom']
+    #                 goal_position.update(dict(zip(disks, resp.sol.positions)))
+    #             else:
+    #                 nonlocal orbita_head_success
+    #                 orbita_head_success = False
 
-    def StreamCartesianCommands(self, request_iterator: cart_pb.FullBodyCartesianCommand, context) -> cart_pb.CartesianCommandAck:
-        for request in request_iterator:
-            self.SendCartesianCommand(request, context)
-        return cart_pb.CartesianCommandAck()
+    #         for name, pos in goal_position.items():
+    #             self.joints[name]['goal_position'] = pos
+    #         self.should_publish_position.set()
 
-    # ZoomController GRPC
-    def SendZoomCommand(self, request, context):
-        """Send command to zoom controller of the requested camera."""
-        req = ZoomCommand.Request()
-        req.side = request.side
-        req.zoom_command = request.command
-        future = self.zoom_command_client.call_async(req)
-        return zc_pb.Empty()
+    #     t = threading.Thread(target=bg)
+    #     t.daemon = True
+    #     t.start()
 
-    def SetZoomSpeed(self, request, context):
-        """Change zoom controller motors speed."""
-        req = SetZoomSpeed.Request()
-        req.speed = request.speed
-        future = self.zoom_speed_client.call_async(req)
-        return zc_pb.Empty()
+    #     running.wait()
+
+    #     for _ in range(100):
+    #         if not t.is_alive():
+    #             break
+    #         time.sleep(0.001)
+    #     else:
+    #         self.logger.warning('ik service timeout!')
+    #         left_arm_success = False
+    #         right_arm_success = False
+    #         orbita_head_success = False
+
+    #     return cartesian_command_pb2.CartesianCommandAck(
+    #         left_arm_success=left_arm_success,
+    #         right_arm_success=right_arm_success,
+    #         orbita_head_success=orbita_head_success,
+    #     )
+
+    # def StreamCartesianCommands(self, request_iterator: cartesian_command_pb2.FullBodyCartesianCommand, context) -> cartesian_command_pb2.CartesianCommandAck:
+    #     for request in request_iterator:
+    #         self.SendCartesianCommand(request, context)
+    #     return cartesian_command_pb2.CartesianCommandAck()
 
 
 def main():
@@ -546,17 +511,11 @@ def main():
 
     sdk_server = ReachySDKServer(node_name='reachy_sdk_server')
 
-    options = [
-         ('grpc.max_send_message_length', 250000),  # empirical value, might be adjusted
-         ('grpc.max_receive_message_length', 250000)]
-    server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=30), options=options)
-    joint_state_pb2_grpc.add_JointStateServiceServicer_to_server(sdk_server, server)
-    joint_command_pb2_grpc.add_JointCommandServiceServicer_to_server(sdk_server, server)
-    camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(sdk_server, server)
-    load_sensor_pb2_grpc.add_LoadServiceServicer_to_server(sdk_server, server)
+    server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10))
+    joint_pb2_grpc.add_JointServiceServicer_to_server(sdk_server, server)
+    sensor_pb2_grpc.add_SensorServiceServicer_to_server(sdk_server, server)
     orbita_kinematics_pb2_grpc.add_OrbitaKinematicServicer_to_server(sdk_server, server)
     arm_kinematics_pb2_grpc.add_ArmKinematicServicer_to_server(sdk_server, server)
-    zoom_command_pb2_grpc.add_ZoomControllerServiceServicer_to_server(sdk_server, server)
     cartesian_command_pb2_grpc.add_CartesianCommandServiceServicer_to_server(sdk_server, server)
     kinematics_pb2_grpc.add_KinematicsServiceServicer_to_server(sdk_server, server)
 
