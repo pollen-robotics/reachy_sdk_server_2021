@@ -291,7 +291,7 @@ class ReachySDKServer(Node,
                 time.sleep(dt - elapsed_time)
             last_pub = t
 
-    def SendCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointCommandAck:
+    def SendJointsCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointCommandAck:
         """Handle new received commands.
 
         Does not properly handle the async response success at the moment.
@@ -299,7 +299,7 @@ class ReachySDKServer(Node,
         success = self.handle_commands(request.commands)
         return joint_pb2.JointCommandAck(success=success)
 
-    def StreamJointsCommand(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
+    def StreamJointsCommands(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
         """Handle stream of commands for multiple joints."""
         success = True
         for request in request_iterator:
@@ -443,7 +443,7 @@ class ReachySDKServer(Node,
             ),
         )
 
-    def SendCartesianCommand(
+    def SendFullBodyCartesianCommands(
         self,
         request: fullbody_cartesian_command_pb2.FullBodyCartesianCommand,
         context,
