@@ -365,7 +365,7 @@ class ReachySDKServer(Node,
         return orbita_kinematics_pb2.OrbitaIKSolution(
             success=True,
             disk_position=kinematics_pb2.JointPosition(
-                ids=[joint_pb2.JointId(uid=self.names2ids[name]) for name in resp.disk_position.name],
+                ids=[joint_pb2.JointId(uid=self.names2ids[f'neck_{name}']) for name in resp.disk_position.name],
                 positions=resp.disk_position.position,
             ),
         )
@@ -464,8 +464,8 @@ class ReachySDKServer(Node,
                 resp = self._call_arm_ik(request.left_arm)
                 if resp.success:
                     goal_position.update(dict(zip(
-                        (self._joint_id_to_name(name) for name in resp.arm_position.positions.ids),
-                        resp.arm_position.positions.positions,
+                        resp.joint_position.name,
+                        resp.joint_position.position,
                     )))
                 else:
                     nonlocal left_arm_success
@@ -475,8 +475,8 @@ class ReachySDKServer(Node,
                 resp = self._call_arm_ik(request.right_arm)
                 if resp.success:
                     goal_position.update(dict(zip(
-                        (self._joint_id_to_name(name) for name in resp.arm_position.positions.ids),
-                        resp.arm_position.positions.positions,
+                        resp.joint_position.name,
+                        resp.joint_position.position,
                     )))
                 else:
                     nonlocal right_arm_success
@@ -486,8 +486,8 @@ class ReachySDKServer(Node,
                 resp = self.ComputeOrbitaIK(request.neck, context)
                 if resp.success:
                     goal_position.update(dict(zip(
-                        (self._joint_id_to_name(name) for name in resp.disk_position.positions.ids),
-                        resp.disk_position.positions.positions,
+                        (self._joint_id_to_name(name) for name in resp.disk_position.ids),
+                        resp.disk_position.positions,
                     )))
                 else:
                     nonlocal orbita_head_success
