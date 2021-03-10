@@ -57,10 +57,10 @@ class ArmCopyGRPC():
     def get_pose(self):
         """
         Handle reproduction of right arm movements on the left arm.
+
         Read right arm joints state and apply the modified commands on the left arm.
         Callback for the class thread.
         """
-
         request = JointsStateRequest(
             ids=self.right_arm,
             requested_fields=[JointField.PRESENT_POSITION]
