@@ -391,7 +391,7 @@ class ReachySDKServer(Node,
         fk_client = self.left_arm_fk if request.arm_position.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_fk
 
         req = GetArmFK.Request()
-        req.joint_position.position = request.positions.positions
+        req.joint_position.position = request.arm_position.positions.positions
 
         resp = fk_client.call(req)
         M = np.eye(4)
