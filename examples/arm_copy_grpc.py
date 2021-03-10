@@ -39,13 +39,13 @@ class ArmCopyGRPC():
 
     def __init__(self) -> None:
         """Set up the class and open connection to server and service."""
-        self.channel = grpc.insecure_channel(f'localhost:50055')
+        self.channel = grpc.insecure_channel('localhost:50055')
         self.stub = joint_pb2_grpc.JointServiceStub(self.channel)
 
         self.alive = True
 
     def set_compliancy_left(self, compliancy) -> None:
-        """"Set left arm stiff or compliant."""
+        """Set left arm stiff or compliant."""
         request = JointsCommand(
             commands=[
                 JointCommand(id=name, compliant=BoolValue(value=compliancy))
@@ -56,10 +56,11 @@ class ArmCopyGRPC():
 
     def get_pose(self):
         """
-            Handle reproduction of right arm movements on the left arm.
-            Read right arm joints state and apply the modified commands on the left arm.
-            Callback for the class thread.
+        Handle reproduction of right arm movements on the left arm.
+        Read right arm joints state and apply the modified commands on the left arm.
+        Callback for the class thread.
         """
+
         request = JointsStateRequest(
             ids=self.right_arm,
             requested_fields=[JointField.PRESENT_POSITION]
