@@ -13,7 +13,7 @@ from joint_pb2 import JointId, JointField, JointsCommand, JointCommand, JointsSt
 from arm_kinematics_pb2 import ArmFKRequest, ArmEndEffector, ArmSide, ArmJointPosition, ArmIKRequest
 from fullbody_cartesian_command_pb2 import FullBodyCartesianCommand
 from kinematics_pb2 import JointPosition
-from google.protobuf.wrappers_pb2 import FloatValue, BoolValue
+from google.protobuf.wrappers_pb2 import BoolValue
 
 
 class ArmCopyGRPC():
