@@ -410,7 +410,7 @@ class ReachySDKServer(Node,
         fk_client = self.left_arm_fk if request.side == armk_pb.ArmSide.LEFT else self.right_arm_fk
 
         req = GetArmFK.Request()
-        req.joint_position.position = request.positions.positions
+        req.joint_position.position = request.arm_position.positions.positions
 
         resp = fk_client.call(req)
         M = np.eye(4)
