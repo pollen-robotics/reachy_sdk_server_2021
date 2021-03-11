@@ -92,6 +92,10 @@ class ArmCopyGRPC():
 
             new_target = ik_right.end_effector.pose
             new_target.data[7] = -new_target.data[7]
+            new_target.data[1] = -new_target.data[1]
+            new_target.data[4] = -new_target.data[4]
+            new_target.data[6] = -new_target.data[6]
+            new_target.data[9] = -new_target.data[9]
 
             target_left_arm = ArmEndEffector(
                 side=ArmSide.LEFT,
