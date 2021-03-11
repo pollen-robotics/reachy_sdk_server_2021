@@ -16,10 +16,11 @@ from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
 from reachy_sdk_api import zoom_command_pb2 as zoom_pb, zoom_command_pb2_grpc
 
 
-class CameraServer(Node,
-                    camera_reachy_pb2_grpc.CameraServiceServicer,
-                    zoom_command_pb2_grpc.ZoomControllerServiceServicer,
-                    ):
+class CameraServer(
+                Node,
+                camera_reachy_pb2_grpc.CameraServiceServicer,
+                zoom_command_pb2_grpc.ZoomControllerServiceServicer,
+                ):
     """Camera server node."""
 
     def __init__(self, node_name: str) -> None:
