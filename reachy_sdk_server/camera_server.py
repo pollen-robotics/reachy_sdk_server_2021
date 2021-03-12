@@ -1,4 +1,4 @@
-"""TODO."""
+"""Expose Reachy ROS services/topics dealing with camera and zoom controlling through gRPC allowing remote client SDK."""
 
 from functools import partial
 
