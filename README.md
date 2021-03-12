@@ -96,7 +96,7 @@ Carry out the inverse kinematics computation for Reachy's arm. <br> See [arm_kin
 
 * **StreamFullBodyCartesianCommands** [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Set continuously the joints to the requested positions given targets in cartesian coordinate system, for both arms and head of Reachy. <br> See [fullbody_cartesian_command.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/fullbody_cartesian_command.proto) for more details.
 
-* **GetImage** [camera_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/camera_server.py)] -
+* **GetImage** [[camera_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/camera_server.py)] -
 Return the image of the requested Reachy's camera. <br> See [camera_reachy.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/camera_reachy.proto) for more details.
 
 * **SendZoomCommand** [[camera_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/camera_server.py)] - Change Reachy's camera zoom speed to the requested value. <br> See [zoom_command.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/zoom_command.proto) for more details.
