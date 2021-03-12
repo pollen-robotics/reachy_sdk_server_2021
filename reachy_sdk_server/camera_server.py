@@ -89,7 +89,7 @@ def main():
     """Run the Node and the gRPC server."""
     rclpy.init()
 
-    camera_server = CameraServer(node_name='reachy_sdk_server')
+    camera_server = CameraServer(node_name='camera_server')
 
     options = [
          ('grpc.max_send_message_length', 250000),
