@@ -27,7 +27,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'reachy_sdk_server = reachy_sdk_server.reachy_sdk_server:main'
+            'reachy_sdk_server = reachy_sdk_server.reachy_sdk_server:main',
+            'camera_server = reachy_sdk_server.camera_server:main',
         ],
     },
 )
