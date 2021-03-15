@@ -122,7 +122,8 @@ class ReachySDKServer(Node,
         if pid.HasField('pid'):
             return [pid.pid.p, pid.pid.i, pid.pid.d]
         else:
-            return [pid.compliance.cw_compliance_margin, pid.compliance.ccw_compliance_margin, pid.compliance.cw_compliance_slope, pid.compliance.ccw_compliance_slope]
+            return [pid.compliance.cw_compliance_margin, pid.compliance.ccw_compliance_margin,
+                    pid.compliance.cw_compliance_slope, pid.compliance.ccw_compliance_slope]
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointFullState srv."""
