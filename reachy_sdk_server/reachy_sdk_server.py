@@ -22,8 +22,8 @@ from rclpy.node import Node
 from geometry_msgs.msg import Point, Quaternion, Vector3
 from sensor_msgs.msg import JointState
 
-from reachy_msgs.msg import JointTemperature, ForceSensor
-from reachy_msgs.srv import GetJointFullState, SetJointCompliancy
+from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains
+from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
@@ -76,6 +76,8 @@ class ReachySDKServer(Node,
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
 
+        self.set_pid_client = self.create_client(SetJointPidGains, 'set_joint_pid')
+
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
             msg_type=JointState, topic='joint_states',
@@ -110,6 +112,19 @@ class ReachySDKServer(Node,
 
         self.logger.info('SDK ready to be served!')
 
+    def _repr_ros_pid(self, pid: PidGains) -> List:
+        if pid.p != 0:
+            return [pid.p, pid.i, pid.d]
+        else:
+            return [pid.cw_compliance_margin, pid.ccw_compliance_margin, pid.cw_compliance_slope, pid.ccw_compliance_slope]
+
+    def _repr_proto_pid(self, pid: joint_pb2.PIDValue) -> List:
+        if pid.HasField('pid'):
+            return [pid.pid.p, pid.pid.i, pid.pid.d]
+        else:
+            return [pid.compliance.cw_compliance_margin, pid.compliance.ccw_compliance_margin,
+                    pid.compliance.cw_compliance_slope, pid.compliance.ccw_compliance_slope]
+
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointFullState srv."""
         self.logger.info('Getting all joints initial configuration...')
@@ -137,6 +152,7 @@ class ReachySDKServer(Node,
                 'goal_position': full_state_resp.goal_position[i],
                 'speed_limit': full_state_resp.speed_limit[i],
                 'torque_limit': full_state_resp.torque_limit[i],
+                'pid': self._repr_ros_pid(full_state_resp.pid_gain[i]),
             }
 
     def on_joint_states(self, joint_state: JointState) -> None:
@@ -238,13 +254,15 @@ class ReachySDKServer(Node,
                 self.joints[name]['torque_limit'] = cmd.torque_limit.value
                 use_goal_eff = True
 
+            if cmd.HasField('pid'):
+                self.joints[name]['pid'] = self._repr_proto_pid(cmd.pid)
+
         if use_goal_pos:
             self.should_publish_position.set()
         if use_goal_vel:
             self.should_publish_velocity.set()
         if use_goal_eff:
             self.should_publish_effort.set()
-
         return success
 
     # Handle GRPCs
@@ -297,6 +315,38 @@ class ReachySDKServer(Node,
         Does not properly handle the async response success at the moment.
         """
         success = self.handle_commands(request.commands)
+
+        names_pid, pid_gains = [], []
+        for cmd in request.commands:
+            name = self._joint_id_to_name(cmd.id)
+            if cmd.pid.HasField('pid'):
+                pid_gain = PidGains(
+                    p=cmd.pid.pid.p,
+                    i=cmd.pid.pid.i,
+                    d=cmd.pid.pid.d,
+                    )
+            elif cmd.pid.HasField('compliance'):
+                pid_gain = PidGains(
+                    cw_compliance_margin=cmd.pid.compliance.cw_compliance_margin,
+                    ccw_compliance_margin=cmd.pid.compliance.ccw_compliance_margin,
+                    cw_compliance_slope=cmd.pid.compliance.cw_compliance_slope,
+                    ccw_compliance_slope=cmd.pid.compliance.ccw_compliance_slope,
+                )
+            names_pid.append(name)
+            pid_gains.append(pid_gain)
+
+        request = SetJointPidGains.Request(
+            name=names_pid,
+            pid_gain=pid_gains,
+            )
+        future = self.set_pid_client.call_async(request)
+        # TODO: Should be re-written using asyncio
+        for _ in range(1000):
+            if future.done():
+                success = future.result().success
+                break
+            time.sleep(0.001)
+
         return joint_pb2.JointCommandAck(success=success)
 
     def StreamJointsCommands(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
