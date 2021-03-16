@@ -29,9 +29,13 @@ Receive new goal_position, effort and velocity for the given joints from the rem
 
 ## Subscribed topics
 
+* **/fan_states** ([sensors_msgs/msg/FanState](https://github.com/pollen-robotics/reachy_msgs/blob/master/msg/FanState.msg))
+[[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - State of each fan in Reachy (three per arm, two in the head and one for orbita joint), published by
+[joint_state_controller](https://github.com/pollen-robotics/reachy_controllers/blob/master/reachy_controllers/joint_state_controller.py). *state=True* means that the fan is turned on.
+
 * **/joint_states** ([sensors_msgs/msg/JointState](http://docs.ros.org/en/api/sensor_msgs/html/msg/JointState.html))
 [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Present
-position, velocity and effort from each joint (both arms, orbita and antennas), published by
+position, velocity, effort and pid from each joint (both arms, orbita and antennas), published by
 [joint_state_controller](https://github.com/pollen-robotics/reachy_controllers/blob/master/reachy_controllers/joint_state_controller.py).
 
 * **/joint_temperatures** ([reachy_msgs/msg/JointTemperature](https://github.com/pollen-robotics/reachy_msgs/blob/master/msg/JointTemperature.msg))
@@ -95,6 +99,12 @@ Carry out the inverse kinematics computation for Reachy's arm. <br> See [arm_kin
 * **SendFullBodyCartesianCommands** [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Set the joints to the requested positions given targets in cartesian coordinate system, for both arms and head of Reachy. <br> See [fullboody_cartesian_command.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/fullbody_cartesian_command.proto) for more details.
 
 * **StreamFullBodyCartesianCommands** [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Set continuously the joints to the requested positions given targets in cartesian coordinate system, for both arms and head of Reachy. <br> See [fullbody_cartesian_command.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/fullbody_cartesian_command.proto) for more details.
+
+* **GetAllFansId** [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Return the id of each fan in Reachy. <br> See [fan.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/fan.proto) for more details.
+
+* **GetFansState** [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Return the state of the requested fans. <br> See [fan.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/fan.proto) for more details.
+
+* **SendFansCommands** [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Set the requested fans to the requested states. <br> See [fan.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/fan.proto) for more details.
 
 * **GetImage** [[camera_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/camera_server.py)] -
 Return the image of the requested Reachy's camera. <br> See [camera_reachy.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/camera_reachy.proto) for more details.
