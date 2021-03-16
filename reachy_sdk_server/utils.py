@@ -2,7 +2,7 @@
 
 from typing import Dict, List
 
-from google.protobuf.wrappers_pb2 import BoolValue, FloatValue
+from google.protobuf.wrappers_pb2 import BoolValue, FloatValue, UInt32Value
 
 from reachy_sdk_api.joint_pb2 import JointField, JointState, PIDGains, PIDValue, ComplianceMarginSlope
 
@@ -29,6 +29,9 @@ def jointstate_pb_from_request(joint: Dict, fields: List) -> JointState:
     for field in fields:
         if field == JointField.NAME:
             params['name'] = joint['name']
+
+        elif field == JointField.UID:
+            _inject_pb_value(params, joint, 'uid', UInt32Value)
 
         elif field == JointField.PRESENT_POSITION and joint['present_position'] is not None:
             _inject_pb_value(params, joint, 'present_position', FloatValue)

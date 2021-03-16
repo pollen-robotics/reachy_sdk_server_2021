@@ -70,8 +70,11 @@ class ReachySDKServer(Node,
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
         self.force_sensors: Dict[str, float] = OrderedDict()
         self.setup()
+
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
         self.names2ids = {name: i for i, name in enumerate(self.joints.keys())}
+        for name, uid in self.names2ids.items():
+            self.joints[name]['uid'] = uid
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
