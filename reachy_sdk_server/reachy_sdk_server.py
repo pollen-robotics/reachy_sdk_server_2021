@@ -292,9 +292,13 @@ class ReachySDKServer(Node,
     def StreamJointsState(self, request: joint_pb2.StreamJointsRequest, context) -> Iterator[joint_pb2.JointsState]:
         """Continuously stream requested joints up-to-date state."""
         dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
-        last_pub = time.time()
+        last_pub = 0.0
 
         while True:
+            elapsed_time = time.time() - last_pub
+            if elapsed_time < dt:
+                time.sleep(dt - elapsed_time)
+
             self.joint_states_pub_event.wait()
             self.joint_states_pub_event.clear()
 
@@ -302,12 +306,7 @@ class ReachySDKServer(Node,
             joints_state.timestamp.GetCurrentTime()
 
             yield joints_state
-
-            t = time.time()
-            elapsed_time = t - last_pub
-            if elapsed_time < dt:
-                time.sleep(dt - elapsed_time)
-            last_pub = t
+            last_pub = time.time()
 
     def SendJointsCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointCommandAck:
         """Handle new received commands.
@@ -380,19 +379,18 @@ class ReachySDKServer(Node,
     def StreamSensorStates(self, request: sensor_pb2.StreamSensorsStateRequest, context) -> Iterator[sensor_pb2.SensorsState]:
         """Continuously stream requested sensors up-to-date value."""
         dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
-        last_pub = time.time()
+        last_pub = 0.0
 
         while True:
+            elapsed_time = time.time() - last_pub
+            if elapsed_time < dt:
+                time.sleep(dt - elapsed_time)
+
             sensors_state = self.GetSensorsState(request.request, context)
             sensors_state.timestamp.GetCurrentTime()
 
             yield sensors_state
-
-            t = time.time()
-            elapsed_time = t - last_pub
-            if elapsed_time < dt:
-                time.sleep(dt - elapsed_time)
-            last_pub = t
+            last_pub = time.time()
 
     # Kinematics Service
     def ComputeOrbitaIK(
