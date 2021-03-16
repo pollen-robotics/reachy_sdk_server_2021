@@ -308,7 +308,7 @@ class ReachySDKServer(Node,
             yield joints_state
             last_pub = time.time()
 
-    def SendJointsCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointCommandAck:
+    def SendJointsCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointsCommandAck:
         """Handle new received commands.
 
         Does not properly handle the async response success at the moment.
@@ -346,16 +346,16 @@ class ReachySDKServer(Node,
                 break
             time.sleep(0.001)
 
-        return joint_pb2.JointCommandAck(success=success)
+        return joint_pb2.JointsCommandAck(success=success)
 
-    def StreamJointsCommands(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
+    def StreamJointsCommands(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointsCommandAck:
         """Handle stream of commands for multiple joints."""
         success = True
         for request in request_iterator:
             resp = self.handle_commands(request.commands)
             if not resp:
                 success = False
-        return joint_pb2.JointCommandAck(success=success)
+        return joint_pb2.JointsCommandAck(success=success)
 
     # Sensor Service
     def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
