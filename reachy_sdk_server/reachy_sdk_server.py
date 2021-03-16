@@ -70,8 +70,11 @@ class ReachySDKServer(Node,
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
         self.force_sensors: Dict[str, float] = OrderedDict()
         self.setup()
+
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
         self.names2ids = {name: i for i, name in enumerate(self.joints.keys())}
+        for name, uid in self.names2ids.items():
+            self.joints[name]['uid'] = uid
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
@@ -338,22 +341,22 @@ class ReachySDKServer(Node,
             yield joints_state
             last_pub = time.time()
 
-    def SendJointsCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointCommandAck:
+    def SendJointsCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointsCommandAck:
         """Handle new received commands.
 
         Does not properly handle the async response success at the moment.
         """
         success = self.handle_commands(request.commands)
-        return joint_pb2.JointCommandAck(success=success)
+        return joint_pb2.JointsCommandAck(success=success)
 
-    def StreamJointsCommands(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointCommandAck:
+    def StreamJointsCommands(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointsCommandAck:
         """Handle stream of commands for multiple joints."""
         success = True
         for request in request_iterator:
             resp = self.handle_commands(request.commands)
             if not resp:
                 success = False
-        return joint_pb2.JointCommandAck(success=success)
+        return joint_pb2.JointsCommandAck(success=success)
 
     # Sensor Service
     def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
