@@ -320,6 +320,8 @@ class ReachySDKServer(Node,
 
         names_pid, pid_gains = [], []
         for cmd in request.commands:
+            if not cmd.HasField('pid'):
+                continue
             name = self._joint_id_to_name(cmd.id)
             if cmd.pid.HasField('pid'):
                 pid_gain = PidGains(
