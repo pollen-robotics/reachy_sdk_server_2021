@@ -74,8 +74,11 @@ class ReachySDKServer(Node,
         self.force_sensors: Dict[str, float] = OrderedDict()
         self.fans: Dict[str, bool] = OrderedDict()
         self.setup()
+
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
         self.names2ids = {name: i for i, name in enumerate(self.joints.keys())}
+        for name, uid in self.names2ids.items():
+            self.joints[name]['uid'] = uid
 
         self.logger.info('Launching pub/sub/srv...')
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
@@ -253,6 +256,41 @@ class ReachySDKServer(Node,
             else:
                 success = False
 
+        names_pid, pid_gains = [], []
+        for cmd in commands:
+            if not cmd.HasField('pid'):
+                continue
+            name = self._joint_id_to_name(cmd.id)
+            if cmd.pid.HasField('pid'):
+                pid_gain = PidGains(
+                    p=cmd.pid.pid.p,
+                    i=cmd.pid.pid.i,
+                    d=cmd.pid.pid.d,
+                    )
+            elif cmd.pid.HasField('compliance'):
+                pid_gain = PidGains(
+                    cw_compliance_margin=cmd.pid.compliance.cw_compliance_margin,
+                    ccw_compliance_margin=cmd.pid.compliance.ccw_compliance_margin,
+                    cw_compliance_slope=cmd.pid.compliance.cw_compliance_slope,
+                    ccw_compliance_slope=cmd.pid.compliance.ccw_compliance_slope,
+                )
+            names_pid.append(name)
+            pid_gains.append(pid_gain)
+        if names_pid:
+            request = SetJointPidGains.Request(
+                name=names_pid,
+                pid_gain=pid_gains,
+                )
+            future = self.set_pid_client.call_async(request)
+            # TODO: Should be re-written using asyncio
+            for _ in range(1000):
+                if future.done():
+                    success = future.result().success
+                    break
+                time.sleep(0.001)
+            else:
+                success = False
+
         use_goal_pos, use_goal_vel, use_goal_eff = False, False, False
         for cmd in commands:
             name = self._joint_id_to_name(cmd.id)
@@ -268,9 +306,6 @@ class ReachySDKServer(Node,
             if cmd.HasField('torque_limit'):
                 self.joints[name]['torque_limit'] = cmd.torque_limit.value
                 use_goal_eff = True
-
-            if cmd.HasField('pid'):
-                self.joints[name]['pid'] = self._repr_proto_pid(cmd.pid)
 
         if use_goal_pos:
             self.should_publish_position.set()
@@ -307,9 +342,13 @@ class ReachySDKServer(Node,
     def StreamJointsState(self, request: joint_pb2.StreamJointsRequest, context) -> Iterator[joint_pb2.JointsState]:
         """Continuously stream requested joints up-to-date state."""
         dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
-        last_pub = time.time()
+        last_pub = 0.0
 
         while True:
+            elapsed_time = time.time() - last_pub
+            if elapsed_time < dt:
+                time.sleep(dt - elapsed_time)
+
             self.joint_states_pub_event.wait()
             self.joint_states_pub_event.clear()
 
@@ -317,12 +356,7 @@ class ReachySDKServer(Node,
             joints_state.timestamp.GetCurrentTime()
 
             yield joints_state
-
-            t = time.time()
-            elapsed_time = t - last_pub
-            if elapsed_time < dt:
-                time.sleep(dt - elapsed_time)
-            last_pub = t
+            last_pub = time.time()
 
     def SendJointsCommands(self, request: joint_pb2.JointsCommand, context) -> joint_pb2.JointsCommandAck:
         """Handle new received commands.
@@ -330,39 +364,7 @@ class ReachySDKServer(Node,
         Does not properly handle the async response success at the moment.
         """
         success = self.handle_commands(request.commands)
-
-        names_pid, pid_gains = [], []
-        for cmd in request.commands:
-            name = self._joint_id_to_name(cmd.id)
-            if cmd.pid.HasField('pid'):
-                pid_gain = PidGains(
-                    p=cmd.pid.pid.p,
-                    i=cmd.pid.pid.i,
-                    d=cmd.pid.pid.d,
-                    )
-            elif cmd.pid.HasField('compliance'):
-                pid_gain = PidGains(
-                    cw_compliance_margin=cmd.pid.compliance.cw_compliance_margin,
-                    ccw_compliance_margin=cmd.pid.compliance.ccw_compliance_margin,
-                    cw_compliance_slope=cmd.pid.compliance.cw_compliance_slope,
-                    ccw_compliance_slope=cmd.pid.compliance.ccw_compliance_slope,
-                )
-            names_pid.append(name)
-            pid_gains.append(pid_gain)
-
-        request = SetJointPidGains.Request(
-            name=names_pid,
-            pid_gain=pid_gains,
-            )
-        future = self.set_pid_client.call_async(request)
-        # TODO: Should be re-written using asyncio
-        for _ in range(1000):
-            if future.done():
-                success = future.result().success
-                break
-            time.sleep(0.001)
-
-        return joint_pb2.JointCommandAck(success=success)
+        return joint_pb2.JointsCommandAck(success=success)
 
     def StreamJointsCommands(self, request_iterator: Iterator[joint_pb2.JointsCommand], context) -> joint_pb2.JointsCommandAck:
         """Handle stream of commands for multiple joints."""
@@ -371,7 +373,7 @@ class ReachySDKServer(Node,
             resp = self.handle_commands(request.commands)
             if not resp:
                 success = False
-        return joint_pb2.JointCommandAck(success=success)
+        return joint_pb2.JointsCommandAck(success=success)
 
     # Sensor Service
     def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
@@ -395,19 +397,18 @@ class ReachySDKServer(Node,
     def StreamSensorStates(self, request: sensor_pb2.StreamSensorsStateRequest, context) -> Iterator[sensor_pb2.SensorsState]:
         """Continuously stream requested sensors up-to-date value."""
         dt = 1.0 / request.publish_frequency if request.publish_frequency > 0 else -1.0
-        last_pub = time.time()
+        last_pub = 0.0
 
         while True:
+            elapsed_time = time.time() - last_pub
+            if elapsed_time < dt:
+                time.sleep(dt - elapsed_time)
+
             sensors_state = self.GetSensorsState(request.request, context)
             sensors_state.timestamp.GetCurrentTime()
 
             yield sensors_state
-
-            t = time.time()
-            elapsed_time = t - last_pub
-            if elapsed_time < dt:
-                time.sleep(dt - elapsed_time)
-            last_pub = t
+            last_pub = time.time()
 
     # Kinematics Service
     def ComputeOrbitaIK(
