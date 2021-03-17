@@ -188,7 +188,7 @@ class ReachySDKServer(Node,
             self.force_sensors[name] = force
 
     def on_fan_states(self, fan_state: FanState) -> None:
-        """Update fan state (on or off) on force_sensor msg."""
+        """Update fan state (on or off) on fan_state msg."""
         for name, state in zip(fan_state.name, fan_state.on):
             self.fans[name] = state
 
