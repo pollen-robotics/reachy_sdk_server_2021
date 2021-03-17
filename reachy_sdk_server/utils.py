@@ -2,9 +2,9 @@
 
 from typing import Dict, List
 
-from google.protobuf.wrappers_pb2 import BoolValue, FloatValue
+from google.protobuf.wrappers_pb2 import BoolValue, FloatValue, UInt32Value
 
-from reachy_sdk_api.joint_pb2 import JointField, JointState
+from reachy_sdk_api.joint_pb2 import JointField, JointState, PIDGains, PIDValue, ComplianceMarginSlope
 
 
 def parse_fields(fields: List) -> List[int]:
@@ -30,6 +30,9 @@ def jointstate_pb_from_request(joint: Dict, fields: List) -> JointState:
         if field == JointField.NAME:
             params['name'] = joint['name']
 
+        elif field == JointField.UID:
+            _inject_pb_value(params, joint, 'uid', UInt32Value)
+
         elif field == JointField.PRESENT_POSITION and joint['present_position'] is not None:
             _inject_pb_value(params, joint, 'present_position', FloatValue)
 
@@ -54,8 +57,8 @@ def jointstate_pb_from_request(joint: Dict, fields: List) -> JointState:
         elif field == JointField.TORQUE_LIMIT:
             _inject_pb_value(params, joint, 'torque_limit', FloatValue)
 
-        # elif field == JointField.PID:
-        #     params['pid'] = random_pid()
+        elif field == JointField.PID:
+            _inject_pid(params, joint)
 
     return JointState(**params)
 
@@ -64,3 +67,23 @@ def _inject_pb_value(params, joint, field, value_type):
     value = value_type()
     value.value = joint[field]
     params[field] = value
+
+
+def _inject_pid(params, joint):
+    if len(joint['pid']) == 3:
+        params['pid'] = PIDValue(
+            pid=PIDGains(
+                p=joint['pid'][0],
+                i=joint['pid'][1],
+                d=joint['pid'][2],
+            )
+            )
+    elif len(joint['pid']) == 4:
+        params['pid'] = PIDValue(
+            compliance=ComplianceMarginSlope(
+                cw_compliance_margin=joint['pid'][0],
+                ccw_compliance_margin=joint['pid'][1],
+                cw_compliance_slope=joint['pid'][2],
+                ccw_compliance_slope=joint['pid'][3],
+            )
+        )
