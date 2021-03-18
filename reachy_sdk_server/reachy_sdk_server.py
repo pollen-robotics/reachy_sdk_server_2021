@@ -155,6 +155,11 @@ class ReachySDKServer(Node,
             speed = full_state_resp.present_speed[i] if full_state_resp.present_speed else None
             load = full_state_resp.present_load[i] if full_state_resp.present_load else None
 
+            # Kind of an ugly way to remove the fake orbita joints
+            # We will need something better in the future.
+            if name in ('neck_roll', 'neck_pitch', 'neck_yaw'):
+                continue
+
             self.joints[name] = {
                 'name': name,
                 'present_position': pos,
