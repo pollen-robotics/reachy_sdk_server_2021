@@ -239,8 +239,15 @@ class ReachySDKServer(Node,
         names, values = [], []
         for cmd in commands:
             if cmd.HasField('compliant'):
-                names.append(self._joint_id_to_name(cmd.id))
+                name = self._joint_id_to_name(cmd.id)
+
+                names.append(name)
                 values.append(cmd.compliant.value)
+
+                if not cmd.compliant.value:
+                    # If turning stiff we reset any obsolete goal_position we may have
+                    self.joints[name]['goal_position'] = self.joints[name]['present_position']
+
         if names:
             request = SetJointCompliancy.Request()
             request.name = names
