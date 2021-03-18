@@ -329,7 +329,7 @@ class ReachySDKServer(Node,
         uids, names = zip(*enumerate(self.joints.keys()))
 
         uids, names = zip(*[
-            (uid, name) for (uid, name) in zip(uids, names) 
+            (uid, name) for (uid, name) in zip(uids, names)
             if name not in ('neck_roll', 'neck_pitch', 'neck_yaw')
         ])
 
