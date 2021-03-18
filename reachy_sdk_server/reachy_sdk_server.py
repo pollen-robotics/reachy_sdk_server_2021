@@ -155,11 +155,6 @@ class ReachySDKServer(Node,
             speed = full_state_resp.present_speed[i] if full_state_resp.present_speed else None
             load = full_state_resp.present_load[i] if full_state_resp.present_load else None
 
-            # Kind of an ugly way to remove the fake orbita joints
-            # We will need something better in the future.
-            if name in ('neck_roll', 'neck_pitch', 'neck_yaw'):
-                continue
-
             self.joints[name] = {
                 'name': name,
                 'present_position': pos,
@@ -332,6 +327,12 @@ class ReachySDKServer(Node,
     def GetAllJointsId(self, request: Empty, context) -> joint_pb2.JointsId:
         """Get all the joints name."""
         uids, names = zip(*enumerate(self.joints.keys()))
+
+        uids, names = zip(*[
+            (uid, name) for (uid, name) in zip(uids, names) 
+            if name not in ('neck_roll', 'neck_pitch', 'neck_yaw')
+        ])
+
         return joint_pb2.JointsId(names=names, uids=uids)
 
     def GetJointsState(self, request: joint_pb2.JointsStateRequest, context) -> joint_pb2.JointsState:
