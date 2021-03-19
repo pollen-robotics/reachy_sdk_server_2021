@@ -6,4 +6,4 @@ source /opt/ros/foxy/setup.bash
 source /home/nuc/reachy_ws/install/setup.bash
 
 # Start the ROS2 launch file
-ros2 launch reachy_sdk_server run_everything.launch.py
+ros2 launch reachy_sdk_server run_everything_$(reachy-identify-models).launch.py
