@@ -391,7 +391,7 @@ class ReachySDKServer(Node,
     # Sensor Service
     def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
         """Get all the force sensors id."""
-        names, uids = zip(*enumerate(self.force_sensors.keys()))
+        uids, names = zip(*enumerate(self.force_sensors.keys()))
         return sensor_pb2.SensorsId(names=names, uids=uids)
 
     def GetSensorsState(self, request: sensor_pb2.SensorsStateRequest, context) -> sensor_pb2.SensorsState:
@@ -401,11 +401,11 @@ class ReachySDKServer(Node,
         params = {}
         params['ids'] = request.ids
         params['states'] = [
-            sensor_pb2.SensorState(force_sensor_state=sensor_pb2.ForceSensorState(force=forces[id]))
+            sensor_pb2.SensorState(force_sensor_state=sensor_pb2.ForceSensorState(force=forces[id.uid]))
             for id in request.ids
         ]
 
-        return sensor_pb2.SensorState(**params)
+        return sensor_pb2.SensorsState(**params)
 
     def StreamSensorStates(self, request: sensor_pb2.StreamSensorsStateRequest, context) -> Iterator[sensor_pb2.SensorsState]:
         """Continuously stream requested sensors up-to-date value."""
