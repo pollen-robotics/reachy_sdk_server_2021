@@ -22,9 +22,10 @@ from rclpy.node import Node
 from geometry_msgs.msg import Point, Quaternion, Vector3
 from sensor_msgs.msg import JointState
 
-from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains
+from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform
+from reachy_msgs.srv import SetFanState
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
@@ -32,6 +33,7 @@ from reachy_sdk_api import orbita_kinematics_pb2, orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
+from reachy_sdk_api import fan_pb2, fan_pb2_grpc
 
 
 from .utils import jointstate_pb_from_request
@@ -49,6 +51,7 @@ class ReachySDKServer(Node,
                       orbita_kinematics_pb2_grpc.OrbitaKinematicsServicer,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
+                      fan_pb2_grpc.FanControllerServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -69,6 +72,7 @@ class ReachySDKServer(Node,
 
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
         self.force_sensors: Dict[str, float] = OrderedDict()
+        self.fans: Dict[str, bool] = OrderedDict()
         self.setup()
 
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
@@ -80,6 +84,7 @@ class ReachySDKServer(Node,
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
 
         self.set_pid_client = self.create_client(SetJointPidGains, 'set_joint_pid')
+        self.set_fan_client = self.create_client(SetFanState, 'set_fan_state')
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
@@ -95,6 +100,11 @@ class ReachySDKServer(Node,
         self.force_sensor_sub = self.create_subscription(
             msg_type=ForceSensor, topic='force_sensors',
             callback=self.on_force_sensors, qos_profile=5,
+        )
+
+        self.fan_states_sub = self.create_subscription(
+            msg_type=FanState, topic='fan_states',
+            callback=self.on_fan_states, qos_profile=5,
         )
 
         self.joint_goals_pub = self.create_publisher(
@@ -180,6 +190,11 @@ class ReachySDKServer(Node,
         for name, force in zip(force_sensor.name, force_sensor.force):
             self.force_sensors[name] = force
 
+    def on_fan_states(self, fan_state: FanState) -> None:
+        """Update fan state (on or off) on fan_state msg."""
+        for name, state in zip(fan_state.name, fan_state.on):
+            self.fans[name] = state
+
     def on_joint_goals_publish(self) -> None:
         """Publish position/velocity/effort on joint_goals.
 
@@ -224,8 +239,15 @@ class ReachySDKServer(Node,
         names, values = [], []
         for cmd in commands:
             if cmd.HasField('compliant'):
-                names.append(self._joint_id_to_name(cmd.id))
+                name = self._joint_id_to_name(cmd.id)
+
+                names.append(name)
                 values.append(cmd.compliant.value)
+
+                if not cmd.compliant.value:
+                    # If turning stiff we reset any obsolete goal_position we may have
+                    self.joints[name]['goal_position'] = self.joints[name]['present_position']
+
         if names:
             request = SetJointCompliancy.Request()
             request.name = names
@@ -305,6 +327,12 @@ class ReachySDKServer(Node,
     def GetAllJointsId(self, request: Empty, context) -> joint_pb2.JointsId:
         """Get all the joints name."""
         uids, names = zip(*enumerate(self.joints.keys()))
+
+        uids, names = zip(*[
+            (uid, name) for (uid, name) in zip(uids, names)
+            if name not in ('neck_roll', 'neck_pitch', 'neck_yaw')
+        ])
+
         return joint_pb2.JointsId(names=names, uids=uids)
 
     def GetJointsState(self, request: joint_pb2.JointsStateRequest, context) -> joint_pb2.JointsState:
@@ -584,6 +612,45 @@ class ReachySDKServer(Node,
             neck_command_success=True,
         )
 
+    # Fan state handler
+    def _fan_ids_request_to_str(self, ids_request: List[fan_pb2.FanId]) -> List[str]:
+        fan_names = list(self.fans.keys())
+        fans_requested = []
+
+        for fid in ids_request:
+            if fid.HasField('uid'):
+                fans_requested.append(fan_names[fid.uid])
+            else:
+                fans_requested.append(fid.name)
+        return fans_requested
+
+    def GetAllFansId(self, request: Empty, context) -> fan_pb2.FansId:
+        """Get the id of each fan in Reachy."""
+        uids, names = zip(*enumerate(self.fans.keys()))
+        return fan_pb2.FansId(names=names, uids=uids)
+
+    def GetFansState(self, request: fan_pb2.FansStateRequest, context) -> fan_pb2.FansState:
+        """Get the state of the requested fans."""
+        params = {}
+        params['ids'] = request.ids
+        params['states'] = [fan_pb2.FanState(on=self.fans[f]) for f in self._fan_ids_request_to_str(request.ids)]
+        return fan_pb2.FansState(**params)
+
+    def SendFansCommands(self, request: fan_pb2.FansCommand, context) -> fan_pb2.FansCommandAck:
+        """Set the states of the requested fans."""
+        ros_request = SetFanState.Request(
+            name=self._fan_ids_request_to_str([fc.id for fc in request.commands]),
+            state=[fc.on for fc in request.commands],
+            )
+        future = self.set_fan_client.call_async(ros_request)
+        # TODO: Should be re-written using asyncio
+        for _ in range(1000):
+            if future.done():
+                success = future.result().success
+                break
+            time.sleep(0.001)
+        return fan_pb2.FansCommandAck(success=success)
+
 
 def main():
     """Run the Node and the gRPC server."""
@@ -597,6 +664,7 @@ def main():
     orbita_kinematics_pb2_grpc.add_OrbitaKinematicsServicer_to_server(sdk_server, server)
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
+    fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
