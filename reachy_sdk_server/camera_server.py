@@ -69,6 +69,7 @@ class CameraServer(
     def on_image_update(self, msg, side):
         """Get data from image. Callback for "/'side'_image "subscriber."""
         self.cam_img[side] = msg.data.tobytes()
+        self.image_published[side].set()
 
     # Handle GRPCs
     # Camera Image
@@ -88,6 +89,7 @@ class CameraServer(
         while True:
             yield self.GetImage(request.request, context)
             self.image_published[side].wait()
+            self.image_published[side].clear()
 
     # Zoom Controller
     def SendZoomCommand(self, request, context):
