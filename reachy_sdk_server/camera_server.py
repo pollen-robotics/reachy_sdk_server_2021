@@ -3,6 +3,8 @@
 from functools import partial
 
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from typing import Iterator
 
 import grpc
 
@@ -12,7 +14,7 @@ from rclpy.node import Node
 from sensor_msgs.msg._compressed_image import CompressedImage
 from reachy_msgs.srv import SetCameraZoomLevel, SetCameraZoomSpeed
 
-from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
+from reachy_sdk_api import camera_reachy_pb2, camera_reachy_pb2_grpc
 from reachy_sdk_api import zoom_command_pb2 as zoom_pb, zoom_command_pb2_grpc
 
 
@@ -42,31 +44,50 @@ class CameraServer(
         self.left_camera_sub = self.create_subscription(
             CompressedImage,
             'left_image',
-            partial(self.decode_img, side='left'),
-            1)
+            partial(self.on_image_update, side='left'),
+            1,
+        )
+
         self.right_camera_sub = self.create_subscription(
             CompressedImage,
             'right_image',
-            partial(self.decode_img, side='right'),
-            1)
+            partial(self.on_image_update, side='right'),
+            1,
+        )
+
         self.cam_img = {
             'left': None,
             'right': None
         }
+        self.image_published = {
+            'left': Event(),
+            'right': Event(),
+        }
 
         self.logger.info('Camera server ready!')
 
-    def decode_img(self, msg, side):
+    def on_image_update(self, msg, side):
         """Get data from image. Callback for "/'side'_image "subscriber."""
-        self.cam_img[side] = msg.data
+        self.cam_img[side] = msg.data.tobytes()
 
     # Handle GRPCs
     # Camera Image
-    def GetImage(self, request, context):
+    def GetImage(self, request: camera_reachy_pb2.ImageRequest, context) -> camera_reachy_pb2.Image:
         """Get the image from the requested camera topic."""
-        im_msg = cam_pb.Image()
-        im_msg.data = self.cam_img[request.side].tobytes()
+        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+
+        im_msg = camera_reachy_pb2.Image()
+        im_msg.data = self.cam_img[side]
+
         return im_msg
+
+    def StreamImage(self, request: camera_reachy_pb2.StreamImageRequest, context) -> Iterator[camera_reachy_pb2.Image]:
+        """Stream the image from the requested camera topic."""
+        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+
+        while True:
+            yield self.GetImage(request.request)
+            self.image_published[side].wait()
 
     # Zoom Controller
     def SendZoomCommand(self, request, context):
