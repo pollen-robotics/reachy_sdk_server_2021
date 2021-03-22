@@ -482,7 +482,7 @@ class ReachySDKServer(Node,
         M[:3, :3] = Rotation.from_quat((q.x, q.y, q.z, q.w)).as_matrix()
 
         return arm_kinematics_pb2.ArmFKSolution(
-            success=True,
+            success=resp.success,
             end_effector=arm_kinematics_pb2.ArmEndEffector(
                 side=request.arm_position.side,
                 pose=kinematics_pb2.Matrix4x4(data=M.flatten()),
