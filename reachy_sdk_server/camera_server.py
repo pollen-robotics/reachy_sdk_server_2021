@@ -71,7 +71,7 @@ class CameraServer(
         self.image_published[side].set()
 
     def _wait_for(self, future):
-        for _ in range(1000):
+        for _ in range(10000):
             if future.done():
                 return future.result()
             time.sleep(0.001)
@@ -98,27 +98,27 @@ class CameraServer(
 
     def SendZoomCommand(self, request: camera_reachy_pb2.ZoomCommand, context) -> camera_reachy_pb2.ZoomCommandAck:
         """Handle zoom command."""
-        if request.command.HasField('homing'):
+        if request.HasField('homing'):
             req = SetCameraZoomLevel.Request()
-            req.name = 'left' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
             req.zoom_level = 'homing'
             result = self._wait_for(self.zoom_level_client.call_async(req))
             success = True if result is not None else False
             return camera_reachy_pb2.ZoomCommandAck(success=success)
 
-        elif request.command.HasField('level'):
+        elif request.HasField('level'):
             req = SetCameraZoomLevel.Request()
-            req.name = 'left' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
             req.zoom_level = camera_reachy_pb2.ZoomLevelCommand.Name(request.level).lower()
             result = self._wait_for(self.zoom_level_client.call_async(req))
             success = True if result is not None else False
             return camera_reachy_pb2.ZoomCommandAck(success=success)
 
-        elif request.command.HasField('speed'):
+        elif request.HasField('speed'):
             req = SetCameraZoomSpeed.Request()
-            req.name = 'left' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
             req.speed = request.speed.speed
-            result = self._wait_for(self.zoom_level_client.call_async(req))
+            result = self._wait_for(self.zoom_speed_client.call_async(req))
             success = True if result is not None else False
             return camera_reachy_pb2.ZoomCommandAck(success=success)
 
@@ -138,7 +138,6 @@ def main():
 
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10), options=options)
     camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(camera_server, server)
-    zoom_command_pb2_grpc.add_ZoomControllerServiceServicer_to_server(camera_server, server)
 
     server.add_insecure_port('[::]:50057')
     server.start()
