@@ -87,8 +87,8 @@ class CameraServer(
         side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.Camera.LEFT else 'right'
 
         while True:
-            yield self.GetImage(request.request, context)
             self.image_published[side].wait()
+            yield self.GetImage(request.request, context)
             self.image_published[side].clear()
 
     # Zoom Controller
