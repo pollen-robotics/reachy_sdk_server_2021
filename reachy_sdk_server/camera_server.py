@@ -106,7 +106,7 @@ class CameraServer(
         result = self._wait_for(self.get_zoom_level_client.call_async(req))
 
         return camera_reachy_pb2.ZoomLevel(
-            level=getattr(camera_reachy_pb2.ZoomLevel, result.zoom_level.upper())
+            level=getattr(camera_reachy_pb2.ZoomLevelPossibilities, result.zoom_level.upper())
         )
 
     def GetZoomSpeed(self, request: camera_reachy_pb2.Camera, context) -> camera_reachy_pb2.ZoomSpeed:
