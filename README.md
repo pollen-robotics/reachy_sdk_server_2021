@@ -1,4 +1,4 @@
-# reachy_sdk_server
+# Reachy 2021 SDK Server
 
 ROS2 package:
 * subscribing to the joints and images topics from [reachy_controllers](https://github.com/pollen-robotics/reachy_controllers), 
