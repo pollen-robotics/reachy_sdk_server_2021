@@ -1,8 +1,11 @@
 """Expose Reachy ROS services/topics dealing with camera and zoom controlling through gRPC allowing remote client SDK."""
 
+import time
 from functools import partial
 
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from typing import Iterator
 
 import grpc
 
@@ -12,14 +15,12 @@ from rclpy.node import Node
 from sensor_msgs.msg._compressed_image import CompressedImage
 from reachy_msgs.srv import SetCameraZoomLevel, SetCameraZoomSpeed
 
-from reachy_sdk_api import camera_reachy_pb2 as cam_pb, camera_reachy_pb2_grpc
-from reachy_sdk_api import zoom_command_pb2 as zoom_pb, zoom_command_pb2_grpc
+from reachy_sdk_api import camera_reachy_pb2, camera_reachy_pb2_grpc
 
 
 class CameraServer(
                 Node,
                 camera_reachy_pb2_grpc.CameraServiceServicer,
-                zoom_command_pb2_grpc.ZoomControllerServiceServicer,
                 ):
     """Camera server node."""
 
@@ -42,47 +43,86 @@ class CameraServer(
         self.left_camera_sub = self.create_subscription(
             CompressedImage,
             'left_image',
-            partial(self.decode_img, side='left'),
-            1)
+            partial(self.on_image_update, side='left'),
+            1,
+        )
+
         self.right_camera_sub = self.create_subscription(
             CompressedImage,
             'right_image',
-            partial(self.decode_img, side='right'),
-            1)
+            partial(self.on_image_update, side='right'),
+            1,
+        )
+
         self.cam_img = {
             'left': None,
             'right': None
         }
+        self.image_published = {
+            'left': Event(),
+            'right': Event(),
+        }
 
         self.logger.info('Camera server ready!')
 
-    def decode_img(self, msg, side):
+    def on_image_update(self, msg, side):
         """Get data from image. Callback for "/'side'_image "subscriber."""
-        self.cam_img[side] = msg.data
+        self.cam_img[side] = msg.data.tobytes()
+        self.image_published[side].set()
+
+    def _wait_for(self, future):
+        for _ in range(10000):
+            if future.done():
+                return future.result()
+            time.sleep(0.001)
 
     # Handle GRPCs
     # Camera Image
-    def GetImage(self, request, context):
+    def GetImage(self, request: camera_reachy_pb2.ImageRequest, context) -> camera_reachy_pb2.Image:
         """Get the image from the requested camera topic."""
-        im_msg = cam_pb.Image()
-        im_msg.data = self.cam_img[request.side].tobytes()
+        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+
+        im_msg = camera_reachy_pb2.Image()
+        im_msg.data = self.cam_img[side]
+
         return im_msg
 
-    # Zoom Controller
-    def SendZoomCommand(self, request, context):
-        """Send command to zoom controller of the requested camera."""
-        req = SetCameraZoomLevel.Request()
-        req.name = request.side
-        req.zoom_level = request.command
-        _ = self.zoom_level_client.call_async(req)
-        return zoom_pb.Empty()
+    def StreamImage(self, request: camera_reachy_pb2.StreamImageRequest, context) -> Iterator[camera_reachy_pb2.Image]:
+        """Stream the image from the requested camera topic."""
+        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.Camera.LEFT else 'right'
 
-    def SetZoomSpeed(self, request, context):
-        """Change zoom controller motors speed."""
-        req = SetCameraZoomSpeed.Request()
-        req.speed = request.speed
-        _ = self.zoom_speed_client.call_async(req)
-        return zoom_pb.Empty()
+        while True:
+            self.image_published[side].wait()
+            yield self.GetImage(request.request, context)
+            self.image_published[side].clear()
+
+    def SendZoomCommand(self, request: camera_reachy_pb2.ZoomCommand, context) -> camera_reachy_pb2.ZoomCommandAck:
+        """Handle zoom command."""
+        if request.HasField('homing'):
+            req = SetCameraZoomLevel.Request()
+            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
+            req.zoom_level = 'homing'
+            result = self._wait_for(self.zoom_level_client.call_async(req))
+            success = True if result is not None else False
+            return camera_reachy_pb2.ZoomCommandAck(success=success)
+
+        elif request.HasField('level'):
+            req = SetCameraZoomLevel.Request()
+            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
+            req.zoom_level = camera_reachy_pb2.ZoomLevelCommand.Name(request.level).lower()
+            result = self._wait_for(self.zoom_level_client.call_async(req))
+            success = True if result is not None else False
+            return camera_reachy_pb2.ZoomCommandAck(success=success)
+
+        elif request.HasField('speed'):
+            req = SetCameraZoomSpeed.Request()
+            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
+            req.speed = request.speed.speed
+            result = self._wait_for(self.zoom_speed_client.call_async(req))
+            success = True if result is not None else False
+            return camera_reachy_pb2.ZoomCommandAck(success=success)
+
+        return camera_reachy_pb2.ZoomCommandAck(success=False)
 
 
 def main():
@@ -98,7 +138,6 @@ def main():
 
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10), options=options)
     camera_reachy_pb2_grpc.add_CameraServiceServicer_to_server(camera_server, server)
-    zoom_command_pb2_grpc.add_ZoomControllerServiceServicer_to_server(camera_server, server)
 
     server.add_insecure_port('[::]:50057')
     server.start()
