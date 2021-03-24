@@ -83,7 +83,7 @@ class CameraServer(
     # Camera Image
     def GetImage(self, request: camera_reachy_pb2.ImageRequest, context) -> camera_reachy_pb2.Image:
         """Get the image from the requested camera topic."""
-        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.CameraId.LEFT else 'right'
+        side = 'left' if request.camera.id == camera_reachy_pb2.CameraId.LEFT else 'right'
 
         im_msg = camera_reachy_pb2.Image()
         im_msg.data = self.cam_img[side]
@@ -92,7 +92,7 @@ class CameraServer(
 
     def StreamImage(self, request: camera_reachy_pb2.StreamImageRequest, context) -> Iterator[camera_reachy_pb2.Image]:
         """Stream the image from the requested camera topic."""
-        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.CameraId.LEFT else 'right'
+        side = 'left' if request.request.camera.id == camera_reachy_pb2.CameraId.LEFT else 'right'
 
         while True:
             self.image_published[side].wait()
