@@ -13,6 +13,7 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg._compressed_image import CompressedImage
+from reachy_msgs.srv import GetCameraZoomLevel, GetCameraZoomSpeed
 from reachy_msgs.srv import SetCameraZoomLevel, SetCameraZoomSpeed
 
 from reachy_sdk_api import camera_reachy_pb2, camera_reachy_pb2_grpc
@@ -37,8 +38,10 @@ class CameraServer(
 
         self.logger.info('Launching sub/srv...')
 
-        self.zoom_level_client = self.create_client(SetCameraZoomLevel, 'set_camera_zoom_level')
-        self.zoom_speed_client = self.create_client(SetCameraZoomSpeed, 'set_camera_zoom_speed')
+        self.get_zoom_level_client = self.create_client(GetCameraZoomLevel, 'get_camera_zoom_level')
+        self.get_zoom_speed_client = self.create_client(GetCameraZoomSpeed, 'get_camera_zoom_speed')
+        self.set_zoom_level_client = self.create_client(SetCameraZoomLevel, 'set_camera_zoom_level')
+        self.set_zoom_speed_client = self.create_client(SetCameraZoomSpeed, 'set_camera_zoom_speed')
 
         self.left_camera_sub = self.create_subscription(
             CompressedImage,
@@ -80,7 +83,7 @@ class CameraServer(
     # Camera Image
     def GetImage(self, request: camera_reachy_pb2.ImageRequest, context) -> camera_reachy_pb2.Image:
         """Get the image from the requested camera topic."""
-        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.CameraId.LEFT else 'right'
 
         im_msg = camera_reachy_pb2.Image()
         im_msg.data = self.cam_img[side]
@@ -89,36 +92,58 @@ class CameraServer(
 
     def StreamImage(self, request: camera_reachy_pb2.StreamImageRequest, context) -> Iterator[camera_reachy_pb2.Image]:
         """Stream the image from the requested camera topic."""
-        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.Camera.LEFT else 'right'
+        side = 'left' if camera_reachy_pb2.ImageRequest.camera == camera_reachy_pb2.CameraId.LEFT else 'right'
 
         while True:
             self.image_published[side].wait()
             yield self.GetImage(request.request, context)
             self.image_published[side].clear()
 
+    def GetZoomLevel(self, request: camera_reachy_pb2.Camera, context) -> camera_reachy_pb2.ZoomLevel:
+        """Return current zoom level."""
+        req = GetCameraZoomLevel.Request()
+        req.name = 'left_eye' if request.id == camera_reachy_pb2.CameraId.LEFT else 'right_eye'
+        result = self._wait_for(self.get_zoom_level_client.call_async(req))
+
+        return camera_reachy_pb2.ZoomLevel(
+            level=getattr(camera_reachy_pb2.ZoomLevelPossibilities, result.zoom_level.upper())
+        )
+
+    def GetZoomSpeed(self, request: camera_reachy_pb2.Camera, context) -> camera_reachy_pb2.ZoomSpeed:
+        """Return current zoom speed."""
+        req = GetCameraZoomSpeed.Request()
+        req.name = 'left_eye' if request.id == camera_reachy_pb2.CameraId.LEFT else 'right_eye'
+        result = self._wait_for(self.get_zoom_speed_client.call_async(req))
+
+        return camera_reachy_pb2.ZoomSpeed(
+            speed=result.speed,
+        )
+
     def SendZoomCommand(self, request: camera_reachy_pb2.ZoomCommand, context) -> camera_reachy_pb2.ZoomCommandAck:
         """Handle zoom command."""
-        if request.HasField('homing'):
+        name = 'left_eye' if request.camera.id == camera_reachy_pb2.CameraId.LEFT else 'right_eye'
+
+        if request.HasField('homing_command'):
             req = SetCameraZoomLevel.Request()
-            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
+            req.name = name
             req.zoom_level = 'homing'
-            result = self._wait_for(self.zoom_level_client.call_async(req))
+            result = self._wait_for(self.set_zoom_level_client.call_async(req))
             success = True if result is not None else False
             return camera_reachy_pb2.ZoomCommandAck(success=success)
 
-        elif request.HasField('level'):
+        elif request.HasField('level_command'):
             req = SetCameraZoomLevel.Request()
-            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
-            req.zoom_level = camera_reachy_pb2.ZoomLevelCommand.Name(request.level).lower()
-            result = self._wait_for(self.zoom_level_client.call_async(req))
+            req.name = name
+            req.zoom_level = camera_reachy_pb2.ZoomLevelPossibilities.Name(request.level_command.level).lower()
+            result = self._wait_for(self.set_zoom_level_client.call_async(req))
             success = True if result is not None else False
             return camera_reachy_pb2.ZoomCommandAck(success=success)
 
-        elif request.HasField('speed'):
+        elif request.HasField('speed_command'):
             req = SetCameraZoomSpeed.Request()
-            req.name = 'left_eye' if request.camera == camera_reachy_pb2.Camera.LEFT else 'right_eye'
-            req.speed = request.speed.speed
-            result = self._wait_for(self.zoom_speed_client.call_async(req))
+            req.name = name
+            req.speed = request.speed_command.speed
+            result = self._wait_for(self.set_zoom_speed_client.call_async(req))
             success = True if result is not None else False
             return camera_reachy_pb2.ZoomCommandAck(success=success)
 
