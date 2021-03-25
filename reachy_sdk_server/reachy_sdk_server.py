@@ -296,7 +296,7 @@ class ReachySDKServer(Node,
                 if future.done():
                     success = future.result().success
                     for name, val in zip(names_pid, pid_gains):
-                        self.joints[name]['pid'] = self._repr_proto_pid(val)
+                        self.joints[name]['pid'] = self._repr_ros_pid(val)
                     break
                 time.sleep(0.001)
             else:
