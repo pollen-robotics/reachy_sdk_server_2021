@@ -258,6 +258,8 @@ class ReachySDKServer(Node,
             for _ in range(1000):
                 if future.done():
                     success = future.result().success
+                    for name, val in zip(names, values):
+                        self.joints[name]['compliant'] = val
                     break
                 time.sleep(0.001)
             else:
@@ -293,6 +295,8 @@ class ReachySDKServer(Node,
             for _ in range(1000):
                 if future.done():
                     success = future.result().success
+                    for name, val in zip(names_pid, pid_gains):
+                        self.joints[name]['pid'] = self._repr_proto_pid(val)
                     break
                 time.sleep(0.001)
             else:
