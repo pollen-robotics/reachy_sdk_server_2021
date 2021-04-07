@@ -6,4 +6,11 @@ source /opt/ros/foxy/setup.bash
 source $HOME/reachy_ws/install/setup.bash
 
 # Start the ROS2 launch file
-ros2 launch reachy_sdk_server run_everything_$(reachy-identify-model).launch.py
+model=$(reachy-identify-model)
+
+if [[ $model = full_kit* ]] || [[ $model = starter_kit* ]];
+then
+    ros2 launch reachy_sdk_server run_everything.launch.py
+else
+    ros2 launch reachy_sdk_server run_everything_no_head.launch.py
+fi
