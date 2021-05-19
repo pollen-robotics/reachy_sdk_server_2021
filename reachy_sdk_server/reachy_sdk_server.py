@@ -27,6 +27,9 @@ from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGa
 from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform
 from reachy_msgs.srv import SetFanState
 
+from reachy_msgs.msg import MobileBaseDirection
+from reachy_msgs.srv import SetMobileBaseMode
+
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2, orbita_kinematics_pb2_grpc
@@ -34,7 +37,7 @@ from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
-
+from reachy_sdk_api import mobile_platform_reachy_pb2, mobile_platform_reachy_pb2_grpc
 
 from .utils import jointstate_pb_from_request
 
@@ -52,6 +55,7 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
+                      mobile_platform_reachy_pb2_grpc.MobilityServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -122,6 +126,12 @@ class ReachySDKServer(Node,
         self.right_arm_ik = self.create_client(GetArmIK, '/right_arm/kinematics/inverse')
         self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita/kinematics/inverse')
         self.orbita_look_at_tf = self.create_client(GetQuaternionTransform, '/orbita/kinematics/look_vector_to_quaternion')
+
+        # Mobile platform
+        self.mobile_platform_mode_srv = self.create_client(SetMobileBaseMode, '/set_mobile_base_mode')
+        self.mobile_platform_direction_pub = self.create_publisher(
+            msg_type=MobileBaseDirection, topic='mobile_base_direction_goals', qos_profile=5,
+        )
 
         self.logger.info('SDK ready to be served!')
 
@@ -655,6 +665,40 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
+    # Mobile Platform
+    def SendDirection(
+        self, 
+        request: mobile_platform_reachy_pb2.TargetDirectionCommand, 
+        context,
+    ) -> mobile_platform_reachy_pb2.TargetDirectionCommandAck:
+        wheel_direction = MobileBaseDirection()
+        wheel_direction.x = float(request.direction.x)
+        wheel_direction.y = float(request.direction.y)
+        self.mobile_platform_direction_pub.publish(wheel_direction)
+        return mobile_platform_reachy_pb2.TargetDirectionCommandAck(success=True)
+
+    def SetWheelingMode(
+        self,
+        request: mobile_platform_reachy_pb2.WheelingModeCommand,
+        context,
+    ) -> mobile_platform_reachy_pb2.WheelingModeCommandAck:
+        if request.mode == mobile_platform_reachy_pb2.WheelingModePossiblities.IDLE:
+            mode = 'idle'
+        elif request.mode == mobile_platform_reachy_pb2.WheelingModePossiblities.CLOSE_LOOP:
+            mode = 'close_loop'
+        else:
+            self.logger.warning(f'Mode {request.mode} not supported!')
+            return mobile_platform_reachy_pb2.WheelingModeCommandAck(success=False)
+
+        req = SetMobileBaseMode.Request(mode=mode)
+        future = self.mobile_platform_mode_srv.call_async(req)
+        for _ in range(1000):
+            if future.done():
+                success = future.result().success
+                break
+            time.sleep(0.001)
+        return mobile_platform_reachy_pb2.WheelingModeCommandAck(success=success)
+
 
 def main():
     """Run the Node and the gRPC server."""
@@ -669,6 +713,7 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
+    mobile_platform_reachy_pb2_grpc.add_MobilityServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
