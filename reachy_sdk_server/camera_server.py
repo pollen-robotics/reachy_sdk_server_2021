@@ -13,8 +13,10 @@ import rclpy
 from rclpy.node import Node
 
 from google.protobuf.empty_pb2 import Empty
+from google.protobuf.wrappers_pb2 import UInt32Value
 
 from sensor_msgs.msg._compressed_image import CompressedImage
+from reachy_msgs.msg import ZoomCommand
 from reachy_msgs.srv import GetCameraZoomLevel, GetCameraZoomSpeed
 from reachy_msgs.srv import SetCameraZoomLevel, SetCameraZoomSpeed
 from reachy_msgs.srv import GetCameraZoomFocus, SetCameraZoomFocus
@@ -161,15 +163,24 @@ class CameraServer(
         req = GetCameraZoomFocus.Request()
         result = self._wait_for(self.get_zoom_focus_client.call_async(req))
         return camera_reachy_pb2.ZoomFocusMessage(
-            left_focus=result.left_focus,
-            left_zoom=result.left_zoom,
-            right_focus=result.right_focus,
-            right_zoom=result.right_zoom,
+            left_focus=UInt32Value(value=result.left_focus),
+            left_zoom=UInt32Value(value=result.left_zoom),
+            right_focus=UInt32Value(value=result.right_focus),
+            right_zoom=UInt32Value(value=result.right_zoom),
         )
 
     def SetZoomFocus(self, request: camera_reachy_pb2.ZoomFocusMessage, context):
         """Set zoom and/or focus of given camera."""
         req = SetCameraZoomFocus.Request()
+
+        for field, val in request.ListFields():
+            if field.name not in ['left_focus', 'left_zoom', 'right_focus', 'right_zoom']:
+                self.logger.warning(
+                    "zoom/focus part to set should be in ['left_focus', 'left_zoom', 'right_focus', 'right_zoom']"
+                    )
+                return camera_reachy_pb2.ZoomCommandAck(success=False)
+            zc_msg = ZoomCommand(value=val.value, flag=True)
+            setattr(req, field.name, zc_msg)
 
         result = self._wait_for(self.set_zoom_focus_client.call_async(req))
         return camera_reachy_pb2.ZoomCommandAck(success=result.success)
@@ -179,7 +190,7 @@ class CameraServer(
         req = SetFocusState.Request()
         req.eye = ['left_eye' if request.id == camera_reachy_pb2.CameraId.LEFT else 'right_eye']
         req.state = [True]
-        result = self._wait_for(self.get_zoom_focus_client.call_async(req))
+        result = self._wait_for(self.set_focus_state_client.call_async(req))
         return camera_reachy_pb2.ZoomCommandAck(success=result.success)
 
     def StopAutofocus(self, request: camera_reachy_pb2.Camera, context):
@@ -187,7 +198,7 @@ class CameraServer(
         req = SetFocusState.Request()
         req.eye = ['left_eye' if request.id == camera_reachy_pb2.CameraId.LEFT else 'right_eye']
         req.state = [False]
-        result = self._wait_for(self.get_zoom_focus_client.call_async(req))
+        result = self._wait_for(self.set_focus_state_client.call_async(req))
         return camera_reachy_pb2.ZoomCommandAck(success=result.success)
 
 
