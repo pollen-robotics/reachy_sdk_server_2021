@@ -718,8 +718,8 @@ class ReachySDKServer(Node,
         close_grippers = []
 
         id2name = {
-            gripper_pb2.GripperId.LEFT: 'left',
-            gripper_pb2.GripperId.RIGHT: 'right',
+            gripper_pb2.GripperId.LEFT: 'l_gripper',
+            gripper_pb2.GripperId.RIGHT: 'r_gripper',
         }
 
         for cmd in request.commands:
