@@ -716,6 +716,7 @@ class ReachySDKServer(Node,
 
         open_grippers = []
         close_grippers = []
+        close_forces = []
 
         id2name = {
             gripper_pb2.GripperId.LEFT: 'l_gripper',
@@ -727,6 +728,7 @@ class ReachySDKServer(Node,
                 open_grippers.append(id2name[cmd.open.id])
             elif cmd.HasField('close'):
                 close_grippers.append(id2name[cmd.close.id])
+                close_forces.append(cmd.close.force)
 
         success = False
 
@@ -740,7 +742,7 @@ class ReachySDKServer(Node,
                 time.sleep(0.001)
 
         if close_grippers:
-            req = CloseGripper.Request(name=close_grippers)
+            req = CloseGripper.Request(name=close_grippers, force=close_forces)
             future = self.close_gripper_srv.call_async(req)
             for _ in range(1000):
                 if future.done():
