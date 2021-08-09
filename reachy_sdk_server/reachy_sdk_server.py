@@ -30,6 +30,9 @@ from reachy_msgs.srv import SetFanState
 from reachy_msgs.msg import MobileBaseDirection
 from reachy_msgs.srv import SetMobileBaseMode
 
+from reachy_msgs.srv import OpenGripper, CloseGripper
+
+
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
 from reachy_sdk_api import orbita_kinematics_pb2, orbita_kinematics_pb2_grpc
@@ -38,6 +41,7 @@ from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
 from reachy_sdk_api import mobile_platform_reachy_pb2, mobile_platform_reachy_pb2_grpc
+from reachy_sdk_api import gripper_pb2, gripper_pb2_grpc
 
 from .utils import jointstate_pb_from_request
 
@@ -56,6 +60,7 @@ class ReachySDKServer(Node,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
                       mobile_platform_reachy_pb2_grpc.MobilityServiceServicer,
+                      gripper_pb2_grpc.GripperServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -132,6 +137,10 @@ class ReachySDKServer(Node,
         self.mobile_platform_direction_pub = self.create_publisher(
             msg_type=MobileBaseDirection, topic='mobile_base_direction_goals', qos_profile=5,
         )
+
+        # Gripper
+        self.open_gripper_srv = self.create_client(OpenGripper, '/open_grippers')
+        self.close_gripper_srv = self.create_client(CloseGripper, '/close_grippers')
 
         self.logger.info('SDK ready to be served!')
 
@@ -699,6 +708,48 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return mobile_platform_reachy_pb2.WheelingModeCommandAck(success=success)
 
+    def SendGripperCommands(
+        self,
+        request: gripper_pb2.GrippersCommand,
+        context,
+    ) -> gripper_pb2.GrippersAck:
+
+        open_grippers = []
+        close_grippers = []
+
+        id2name = {
+            gripper_pb2.GripperId.LEFT: 'left',
+            gripper_pb2.GripperId.RIGHT: 'right',
+        }
+
+        for cmd in request.commands:
+            if cmd.HasField('open'):
+                open_grippers.append(id2name[cmd.open.id])
+            elif cmd.HasField('close'):
+                close_grippers.append(id2name[cmd.close.id])
+
+        success = False
+
+        if open_grippers:
+            req = OpenGripper.Request(name=open_grippers)
+            future = self.open_gripper_srv.call_async(req)
+            for _ in range(1000):
+                if future.done():
+                    success = future.result().success
+                    break
+                time.sleep(0.001)
+
+        if close_grippers:
+            req = CloseGripper.Request(name=close_grippers)
+            future = self.close_gripper_srv.call_async(req)
+            for _ in range(1000):
+                if future.done():
+                    success = future.result().success
+                    break
+                time.sleep(0.001)
+
+        return gripper_pb2.GrippersAck(success=success)
+
 
 def main():
     """Run the Node and the gRPC server."""
@@ -714,6 +765,7 @@ def main():
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
     mobile_platform_reachy_pb2_grpc.add_MobilityServiceServicer_to_server(sdk_server, server)
+    gripper_pb2_grpc.add_GripperServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
