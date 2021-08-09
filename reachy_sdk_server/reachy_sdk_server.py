@@ -224,20 +224,23 @@ class ReachySDKServer(Node,
             self.should_publish_velocity.is_set(),
             self.should_publish_effort.is_set(),
         )):
+
+            joints = [j for j in self.joints.values() if not j['name'].endswith('gripper')]
+
             joint_goals = JointState()
             joint_goals.header.stamp = self.clock.now().to_msg()
-            joint_goals.name = self.joints.keys()
+            joint_goals.name = [j['name'] for j in joints]
 
             if self.should_publish_position.is_set():
-                joint_goals.position = [j['goal_position'] for j in self.joints.values()]
+                joint_goals.position = [j['goal_position'] for j in joints]
                 self.should_publish_position.clear()
 
             if self.should_publish_velocity.is_set():
-                joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
+                joint_goals.velocity = [j['speed_limit'] for j in joints]
                 self.should_publish_velocity.clear()
 
             if self.should_publish_effort.is_set():
-                joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
+                joint_goals.effort = [j['torque_limit'] for j in joints]
                 self.should_publish_effort.clear()
 
             self.joint_goals_pub.publish(joint_goals)
@@ -714,6 +717,12 @@ class ReachySDKServer(Node,
         context,
     ) -> gripper_pb2.GrippersAck:
 
+        if not hasattr(self, '_gripper_state'):
+            self._gripper_state = {
+                'l_gripper': 'open',
+                'r_gripper': 'open',
+            }
+
         open_grippers = []
         close_grippers = []
         close_forces = []
@@ -723,12 +732,18 @@ class ReachySDKServer(Node,
             gripper_pb2.GripperId.RIGHT: 'r_gripper',
         }
 
+        self.logger.info(f'Gripper {request.commands}')
+
         for cmd in request.commands:
-            if cmd.HasField('open'):
-                open_grippers.append(id2name[cmd.open.id])
-            elif cmd.HasField('close'):
-                close_grippers.append(id2name[cmd.close.id])
+            name = id2name[cmd.open.id] if cmd.HasField('open') else id2name[cmd.close.id]
+
+            if cmd.HasField('open') and self._gripper_state[name] != 'open':
+                open_grippers.append(name)
+                self._gripper_state[name] = 'open'
+            elif cmd.HasField('close') and self._gripper_state[name] != 'close':
+                close_grippers.append(name)
                 close_forces.append(cmd.close.force)
+                self._gripper_state[name] = 'close'
 
         success = False
 
