@@ -30,8 +30,7 @@ from reachy_msgs.srv import SetFanState
 from reachy_msgs.msg import MobileBaseDirection
 from reachy_msgs.srv import SetMobileBaseMode
 
-from reachy_msgs.srv import OpenGripper, CloseGripper
-
+from reachy_msgs.msg import Gripper as GripperMsg
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
@@ -139,8 +138,9 @@ class ReachySDKServer(Node,
         )
 
         # Gripper
-        self.open_gripper_srv = self.create_client(OpenGripper, '/open_grippers')
-        self.close_gripper_srv = self.create_client(CloseGripper, '/close_grippers')
+        self.grippers_pub = self.create_publisher(
+            msg_type=GripperMsg, topic='grippers', qos_profile=5,
+        )
 
         self.logger.info('SDK ready to be served!')
 
@@ -717,55 +717,24 @@ class ReachySDKServer(Node,
         context,
     ) -> gripper_pb2.GrippersAck:
 
-        if not hasattr(self, '_gripper_state'):
-            self._gripper_state = {
-                'l_gripper': 'open',
-                'r_gripper': 'open',
-            }
-
-        open_grippers = []
-        close_grippers = []
-        close_forces = []
-
         id2name = {
             gripper_pb2.GripperId.LEFT: 'l_gripper',
             gripper_pb2.GripperId.RIGHT: 'r_gripper',
         }
-
-        self.logger.info(f'Gripper {request.commands}')
+        
+        gripper_msg = GripperMsg()
 
         for cmd in request.commands:
-            name = id2name[cmd.open.id] if cmd.HasField('open') else id2name[cmd.close.id]
+            name = id2name[cmd.id]
+            
+            gripper_msg.name.append(name)
+            gripper_msg.opening.append(cmd.opening)
+            gripper_msg.force.append(cmd.force)
 
-            if cmd.HasField('open') and self._gripper_state[name] != 'open':
-                open_grippers.append(name)
-                self._gripper_state[name] = 'open'
-            elif cmd.HasField('close') and self._gripper_state[name] != 'close':
-                close_grippers.append(name)
-                close_forces.append(cmd.close.force)
-                self._gripper_state[name] = 'close'
+        if gripper_msg.name:
+            self.grippers_pub.publish(gripper_msg)
 
-        success = False
-
-        if open_grippers:
-            req = OpenGripper.Request(name=open_grippers)
-            future = self.open_gripper_srv.call_async(req)
-            for _ in range(1000):
-                if future.done():
-                    success = future.result().success
-                    break
-                time.sleep(0.001)
-
-        if close_grippers:
-            req = CloseGripper.Request(name=close_grippers, force=close_forces)
-            future = self.close_gripper_srv.call_async(req)
-            for _ in range(1000):
-                if future.done():
-                    success = future.result().success
-                    break
-                time.sleep(0.001)
-
-        return gripper_pb2.GrippersAck(success=success)
+        return gripper_pb2.GrippersAck(success=True)
 
 
 def main():
