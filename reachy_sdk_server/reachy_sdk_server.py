@@ -34,10 +34,8 @@ from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
-from reachy_sdk_api import restart_signal_pb2, restart_signal_pb2_grpc
 
 from .utils import jointstate_pb_from_request
-from .tools import send_service_signal
 
 proto_arm_side_to_str = {
     arm_kinematics_pb2.ArmSide.LEFT: 'left',
@@ -52,7 +50,6 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
-                      restart_signal_pb2_grpc.RestartServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -656,16 +653,6 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
-    # Restart/stop service signal
-    def SendRestartSignal(self, request: restart_signal_pb2.RestartCmd, context) -> restart_signal_pb2.RestartSignalAck:
-        """Restart or stop reachy_sdk_server.service."""
-        restart_grpc_cmd_to_str = {
-            restart_signal_pb2.SignalType.RESTART: 'restart',
-            restart_signal_pb2.SignalType.STOP: 'stop',
-        }
-        send_service_signal(restart_grpc_cmd_to_str[request.cmd])
-        return restart_signal_pb2.RestartSignalAck(success=True)
-
 
 def main():
     """Run the Node and the gRPC server."""
@@ -680,7 +667,6 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
-    restart_signal_pb2_grpc.add_RestartServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
