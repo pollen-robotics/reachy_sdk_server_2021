@@ -44,7 +44,6 @@ from reachy_sdk_api import gripper_pb2, gripper_pb2_grpc
 
 from .utils import jointstate_pb_from_request
 
-
 proto_arm_side_to_str = {
     arm_kinematics_pb2.ArmSide.LEFT: 'left',
     arm_kinematics_pb2.ArmSide.RIGHT: 'right',
