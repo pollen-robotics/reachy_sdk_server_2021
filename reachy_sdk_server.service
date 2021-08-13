@@ -1,0 +1,13 @@
+[Unit]
+Description=Reachy SDK server service
+Wants=network-online.target
+After=network.target network-online.target
+[Service]
+PIDFile=/var/run/reachy_sdk_server.pid
+ExecStart=/usr/bin/bash /home/pierre/reachy_ws/src/reachy_sdk_server/launch_all.bash
+Environment="PATH=/opt/ros/foxy/bin:/home/pierre/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/pierre/.local/bin"
+User=pierre
+Group=pierre
+Type=simple
+[Install]
+WantedBy=multi-user.target
