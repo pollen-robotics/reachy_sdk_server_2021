@@ -666,6 +666,7 @@ class ReachySDKServer(Node,
         send_service_signal(restart_grpc_cmd_to_str[request.cmd])
         return restart_signal_pb2.RestartSignalAck(success=True)
 
+
 def main():
     """Run the Node and the gRPC server."""
     rclpy.init()
