@@ -181,7 +181,7 @@ class ReachySDKServer(Node,
         joint_fullstate_client = self.create_client(
             srv_type=GetJointFullState, srv_name='get_joint_full_state',
         )
-        while joint_fullstate_client.wait_for_service(timeout_sec=self.timeout_sec):
+        while joint_fullstate_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {joint_fullstate_client.srv_name} not available, waiting again...')
 
         fut = joint_fullstate_client.call_async(GetJointFullState.Request())
