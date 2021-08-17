@@ -81,10 +81,18 @@ class ReachySDKServer(Node,
             self.joints[name]['uid'] = uid
 
         self.logger.info('Launching pub/sub/srv...')
+
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
+        while not self.compliant_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'service {self.compliant_client.srv_name} not available, waiting again...')
 
         self.set_pid_client = self.create_client(SetJointPidGains, 'set_joint_pid')
+        while not self.set_pid_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'service {self.set_pid_client.srv_name} not available, waiting again...')
+
         self.set_fan_client = self.create_client(SetFanState, 'set_fan_state')
+        while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
@@ -123,6 +131,10 @@ class ReachySDKServer(Node,
         self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita/kinematics/inverse')
         self.orbita_look_at_tf = self.create_client(GetQuaternionTransform, '/orbita/kinematics/look_vector_to_quaternion')
 
+        for cli in [self.left_arm_fk, self.left_arm_ik, self.right_arm_fk, self.right_arm_ik, self.orbita_ik, self.orbita_look_at_tf]:
+            while not cli.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info(f'service {cli.srv_name} not available, waiting again...')
+
         self.logger.info('SDK ready to be served!')
 
     def _repr_ros_pid(self, pid: PidGains) -> List:
@@ -145,7 +157,9 @@ class ReachySDKServer(Node,
         joint_fullstate_client = self.create_client(
             srv_type=GetJointFullState, srv_name='get_joint_full_state',
         )
-        joint_fullstate_client.wait_for_service(timeout_sec=self.timeout_sec)
+        while joint_fullstate_client.wait_for_service(timeout_sec=self.timeout_sec):
+            self.get_logger().info(f'service {joint_fullstate_client.srv_name} not available, waiting again...')
+      
         fut = joint_fullstate_client.call_async(GetJointFullState.Request())
         rclpy.spin_until_future_complete(self, fut)
         full_state_resp = fut.result()
