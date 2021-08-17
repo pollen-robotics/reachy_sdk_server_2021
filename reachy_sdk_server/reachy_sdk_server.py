@@ -164,8 +164,13 @@ class ReachySDKServer(Node,
         while joint_fullstate_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {joint_fullstate_client.srv_name} not available, waiting again...')
 
-        fut = joint_fullstate_client.call_async(GetJointFullState.Request())
-        rclpy.spin_until_future_complete(self, fut)
+        while True:
+            fut = joint_fullstate_client.call_async(GetJointFullState.Request())
+            rclpy.spin_until_future_complete(self, fut, timeout_sec=1)
+            if not fut.done():
+                self.get_logger().info(f'service {joint_fullstate_client.srv_name} timeout, trying again...')
+                continue
+            break
         full_state_resp = fut.result()
 
         for i, name in enumerate(full_state_resp.name):
