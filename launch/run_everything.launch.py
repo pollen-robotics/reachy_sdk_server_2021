@@ -35,6 +35,16 @@ def generate_launch_description():
             package='reachy_controllers',
             executable='camera_publisher',
         ),
+
+        Node(
+            package='mobile_base_controllers',
+            executable='mobile_base_controller',
+        ),
+        Node(
+            package='reachy_controllers',
+            executable='gripper_controller',
+        ),
+
         # Node(
         #     package='reachy_controllers',
         #     executable='camera_zoom_service',
@@ -47,14 +57,5 @@ def generate_launch_description():
         Node(
             package='reachy_sdk_server',
             executable='camera_server',
-        ),
-
-        Node(
-            package='mobile_base_controllers',
-            executable='mobile_base_controller',
-        ),
-        Node(
-            package='reachy_controllers',
-            executable='gripper_controller',
         ),
     ])
