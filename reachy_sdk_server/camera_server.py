@@ -55,7 +55,7 @@ class CameraServer(
         for cli in [
             self.get_zoom_level_client, self.get_zoom_speed_client, self.set_zoom_level_client, self.set_zoom_speed_client,
             self.get_zoom_focus_client, self.set_zoom_focus_client, self.set_focus_state_client,
-            ]:
+        ]:
             while not cli.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info(f'service {cli.srv_name} not available, waiting again...')
 

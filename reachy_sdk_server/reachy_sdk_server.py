@@ -131,7 +131,11 @@ class ReachySDKServer(Node,
         self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita/kinematics/inverse')
         self.orbita_look_at_tf = self.create_client(GetQuaternionTransform, '/orbita/kinematics/look_vector_to_quaternion')
 
-        for cli in [self.left_arm_fk, self.left_arm_ik, self.right_arm_fk, self.right_arm_ik, self.orbita_ik, self.orbita_look_at_tf]:
+        for cli in [
+            self.left_arm_fk, self.left_arm_ik,
+            self.right_arm_fk, self.right_arm_ik,
+            self.orbita_ik, self.orbita_look_at_tf,
+        ]:
             while not cli.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info(f'service {cli.srv_name} not available, waiting again...')
 
@@ -159,7 +163,7 @@ class ReachySDKServer(Node,
         )
         while joint_fullstate_client.wait_for_service(timeout_sec=self.timeout_sec):
             self.get_logger().info(f'service {joint_fullstate_client.srv_name} not available, waiting again...')
-      
+
         fut = joint_fullstate_client.call_async(GetJointFullState.Request())
         rclpy.spin_until_future_complete(self, fut)
         full_state_resp = fut.result()
