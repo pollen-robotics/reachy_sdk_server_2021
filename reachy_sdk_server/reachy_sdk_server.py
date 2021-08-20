@@ -35,9 +35,7 @@ from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
 
-
 from .utils import jointstate_pb_from_request
-
 
 proto_arm_side_to_str = {
     arm_kinematics_pb2.ArmSide.LEFT: 'left',
