@@ -14,4 +14,3 @@ def send_service_signal(signal_type: str):
 
     if signal_type == 'restart':
         call(['systemctl', '--user', 'start', 'webrtc_server.service'])
-

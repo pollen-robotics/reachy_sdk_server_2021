@@ -8,7 +8,7 @@ source $HOME/reachy_ws/install/setup.bash
 # Start the ROS2 launch file
 model=$(reachy-identify-model)
 
-if [[ $model = full_kit* ]] || [[ $model = starter_kit* ]];
+if [[ $model = full_kit* ]] || [[ $model = starter_kit* ]] || [[ $model = mini ]];
 then
     ros2 launch reachy_sdk_server run_everything.launch.py
 else
