@@ -548,6 +548,10 @@ class ReachySDKServer(Node,
             ),
         )
 
+    def ComputeOrbitaArmIK(self, request: arm_kinematics_pb2.ArmIKRequest, context) -> arm_kinematics_pb2.ArmIKSolution:
+        # TODO: Steve, add your own ROS calls.
+        raise NotImplementedError
+
     def SendFullBodyCartesianCommands(
         self,
         request: fullbody_cartesian_command_pb2.FullBodyCartesianCommand,
