@@ -80,21 +80,26 @@ class ReachySDKServer(Node,
 
         self.logger.info('Launching pub/sub/srv...')
 
-        self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
+        self.compliant_client = self.create_client(
+            SetJointCompliancy, 'set_joint_compliancy')
         while not self.compliant_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info(f'service {self.compliant_client.srv_name} not available, waiting again...')
+            self.get_logger().info(
+                f'service {self.compliant_client.srv_name} not available, waiting again...')
 
-        self.set_pid_client = self.create_client(SetJointPidGains, 'set_joint_pid')
+        self.set_pid_client = self.create_client(
+            SetJointPidGains, 'set_joint_pid')
         while not self.set_pid_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info(f'service {self.set_pid_client.srv_name} not available, waiting again...')
+            self.get_logger().info(
+                f'service {self.set_pid_client.srv_name} not available, waiting again...')
 
         self.set_fan_client = self.create_client(SetFanState, 'set_fan_state')
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
+            self.get_logger().info(
+                f'service {self.set_fan_client.srv_name} not available, waiting again...')
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
-            msg_type=JointState, topic='joint_states',
+            msg_type=JointState, topic='/reachyorbita/joint_states',
             callback=self.on_joint_states, qos_profile=5,
         )
 
@@ -114,20 +119,27 @@ class ReachySDKServer(Node,
         )
 
         self.joint_goals_pub = self.create_publisher(
-            msg_type=JointState, topic='joint_goals', qos_profile=5,
+            msg_type=JointState, topic='/reachyorbita/joint_goals', qos_profile=5,
         )
         self.should_publish_position = threading.Event()
         self.should_publish_velocity = threading.Event()
         self.should_publish_effort = threading.Event()
-        self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
+        self.create_timer(timer_period_sec=self.pub_period,
+                          callback=self.on_joint_goals_publish)
 
         # Kinematics
-        self.left_arm_fk = self.create_client(GetArmFK, '/left_arm/kinematics/forward')
-        self.left_arm_ik = self.create_client(GetArmIK, '/left_arm/kinematics/inverse')
-        self.right_arm_fk = self.create_client(GetArmFK, '/right_arm/kinematics/forward')
-        self.right_arm_ik = self.create_client(GetArmIK, '/right_arm/kinematics/inverse')
-        self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita/kinematics/inverse')
-        self.orbita_look_at_tf = self.create_client(GetQuaternionTransform, '/orbita/kinematics/look_vector_to_quaternion')
+        self.left_arm_fk = self.create_client(
+            GetArmFK, '/left_arm/kinematics/forward')
+        self.left_arm_ik = self.create_client(
+            GetArmIK, '/left_arm/kinematics/inverse')
+        self.right_arm_fk = self.create_client(
+            GetArmFK, '/right_arm/kinematics/forward')
+        self.right_arm_ik = self.create_client(
+            GetArmIK, '/right_arm/kinematics/inverse')
+        self.orbita_ik = self.create_client(
+            GetOrbitaIK, '/orbita/kinematics/inverse')
+        self.orbita_look_at_tf = self.create_client(
+            GetQuaternionTransform, '/orbita/kinematics/look_vector_to_quaternion')
 
         for cli in [
             self.left_arm_fk, self.left_arm_ik,
@@ -135,7 +147,8 @@ class ReachySDKServer(Node,
             self.orbita_ik, self.orbita_look_at_tf,
         ]:
             while not cli.wait_for_service(timeout_sec=1.0):
-                self.get_logger().info(f'service {cli.srv_name} not available, waiting again...')
+                self.get_logger().info(
+                    f'service {cli.srv_name} not available, waiting again...')
 
         self.logger.info('SDK ready to be served!')
 
@@ -161,10 +174,12 @@ class ReachySDKServer(Node,
         )
 
         while True:
-            fut = joint_fullstate_client.call_async(GetJointFullState.Request())
+            fut = joint_fullstate_client.call_async(
+                GetJointFullState.Request())
             rclpy.spin_until_future_complete(self, fut, timeout_sec=1)
             if not fut.done():
-                self.get_logger().info(f'service {joint_fullstate_client.srv_name} timeout, trying again...')
+                self.get_logger().info(
+                    f'service {joint_fullstate_client.srv_name} timeout, trying again...')
                 continue
             break
         full_state_resp = fut.result()
@@ -229,15 +244,18 @@ class ReachySDKServer(Node,
             joint_goals.name = self.joints.keys()
 
             if self.should_publish_position.is_set():
-                joint_goals.position = [j['goal_position'] for j in self.joints.values()]
+                joint_goals.position = [j['goal_position']
+                                        for j in self.joints.values()]
                 self.should_publish_position.clear()
 
             if self.should_publish_velocity.is_set():
-                joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
+                joint_goals.velocity = [j['speed_limit']
+                                        for j in self.joints.values()]
                 self.should_publish_velocity.clear()
 
             if self.should_publish_effort.is_set():
-                joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
+                joint_goals.effort = [j['torque_limit']
+                                      for j in self.joints.values()]
                 self.should_publish_effort.clear()
 
             self.joint_goals_pub.publish(joint_goals)
@@ -294,7 +312,7 @@ class ReachySDKServer(Node,
                     p=cmd.pid.pid.p,
                     i=cmd.pid.pid.i,
                     d=cmd.pid.pid.d,
-                    )
+                )
             elif cmd.pid.HasField('compliance'):
                 pid_gain = PidGains(
                     cw_compliance_margin=cmd.pid.compliance.cw_compliance_margin,
@@ -308,7 +326,7 @@ class ReachySDKServer(Node,
             request = SetJointPidGains.Request(
                 name=names_pid,
                 pid_gain=pid_gains,
-                )
+            )
             future = self.set_pid_client.call_async(request)
             # TODO: Should be re-written using asyncio
             for _ in range(1000):
@@ -427,7 +445,8 @@ class ReachySDKServer(Node,
         params = {}
         params['ids'] = request.ids
         params['states'] = [
-            sensor_pb2.SensorState(force_sensor_state=sensor_pb2.ForceSensorState(force=forces[id.uid]))
+            sensor_pb2.SensorState(
+                force_sensor_state=sensor_pb2.ForceSensorState(force=forces[id.uid]))
             for id in request.ids
         ]
 
@@ -470,7 +489,8 @@ class ReachySDKServer(Node,
         return orbita_kinematics_pb2.OrbitaIKSolution(
             success=True,
             disk_position=kinematics_pb2.JointPosition(
-                ids=[joint_pb2.JointId(uid=self.names2ids[f'neck_{name}']) for name in resp.disk_position.name],
+                ids=[joint_pb2.JointId(
+                    uid=self.names2ids[f'neck_{name}']) for name in resp.disk_position.name],
                 positions=resp.disk_position.position,
             ),
         )
@@ -542,7 +562,8 @@ class ReachySDKServer(Node,
             arm_position=arm_kinematics_pb2.ArmJointPosition(
                 side=request.target.side,
                 positions=kinematics_pb2.JointPosition(
-                    ids=[joint_pb2.JointId(uid=self.names2ids[name]) for name in resp.joint_position.name],
+                    ids=[joint_pb2.JointId(uid=self.names2ids[name])
+                         for name in resp.joint_position.name],
                     positions=resp.joint_position.position,
                 ),
             ),
@@ -591,7 +612,8 @@ class ReachySDKServer(Node,
                 resp = self.ComputeOrbitaIK(request.neck, context)
                 if resp.success:
                     goal_position.update(dict(zip(
-                        (self._joint_id_to_name(name) for name in resp.disk_position.ids),
+                        (self._joint_id_to_name(name)
+                         for name in resp.disk_position.ids),
                         resp.disk_position.positions,
                     )))
                 else:
@@ -659,15 +681,17 @@ class ReachySDKServer(Node,
         """Get the state of the requested fans."""
         params = {}
         params['ids'] = request.ids
-        params['states'] = [fan_pb2.FanState(on=self.fans[f]) for f in self._fan_ids_request_to_str(request.ids)]
+        params['states'] = [fan_pb2.FanState(
+            on=self.fans[f]) for f in self._fan_ids_request_to_str(request.ids)]
         return fan_pb2.FansState(**params)
 
     def SendFansCommands(self, request: fan_pb2.FansCommand, context) -> fan_pb2.FansCommandAck:
         """Set the states of the requested fans."""
         ros_request = SetFanState.Request(
-            name=self._fan_ids_request_to_str([fc.id for fc in request.commands]),
+            name=self._fan_ids_request_to_str(
+                [fc.id for fc in request.commands]),
             state=[fc.on for fc in request.commands],
-            )
+        )
         future = self.set_fan_client.call_async(ros_request)
         # TODO: Should be re-written using asyncio
         for _ in range(1000):
@@ -687,9 +711,12 @@ def main():
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10))
     joint_pb2_grpc.add_JointServiceServicer_to_server(sdk_server, server)
     sensor_pb2_grpc.add_SensorServiceServicer_to_server(sdk_server, server)
-    orbita_kinematics_pb2_grpc.add_OrbitaKinematicsServicer_to_server(sdk_server, server)
-    arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
-    fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
+    orbita_kinematics_pb2_grpc.add_OrbitaKinematicsServicer_to_server(
+        sdk_server, server)
+    arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(
+        sdk_server, server)
+    fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(
+        sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
