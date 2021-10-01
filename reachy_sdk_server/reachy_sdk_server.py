@@ -170,7 +170,7 @@ class ReachySDKServer(Node,
         self.logger.info('Getting all joints initial configuration...')
 
         joint_fullstate_client = self.create_client(
-            srv_type=GetJointFullState, srv_name='get_joint_full_state',
+            srv_type=GetJointFullState, srv_name='/reachyorbita/get_joint_full_state',
         )
 
         while True:
