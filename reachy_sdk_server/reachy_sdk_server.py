@@ -81,7 +81,7 @@ class ReachySDKServer(Node,
         self.logger.info('Launching pub/sub/srv...')
 
         self.compliant_client = self.create_client(
-            SetJointCompliancy, 'set_joint_compliancy')
+            SetJointCompliancy, '/reachyorbita/set_joint_compliancy')
         while not self.compliant_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(
                 f'service {self.compliant_client.srv_name} not available, waiting again...')
