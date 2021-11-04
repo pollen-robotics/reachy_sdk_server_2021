@@ -599,7 +599,10 @@ class ReachySDKServer(Node,
                     orbita_head_success = False
 
             for name, pos in goal_position.items():
-                self.joints[name]['goal_position'] = pos
+                try:
+                    self.joints[name]['goal_position'] = pos
+                except KeyError:
+                    self.logger.warning(f'Could not set goal position to unknown joint "{name}"')
             self.should_publish_position.set()
 
         t = threading.Thread(target=bg)
