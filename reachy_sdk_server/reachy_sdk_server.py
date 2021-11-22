@@ -211,6 +211,8 @@ class ReachySDKServer(Node,
 
     def on_fan_states(self, fan_state: FanState) -> None:
         """Update fan state (on or off) on fan_state msg."""
+        if not fan_state.name:
+            return
         for name, state in zip(fan_state.name, fan_state.on):
             self.fans[name] = state
 
@@ -655,6 +657,9 @@ class ReachySDKServer(Node,
 
     def GetAllFansId(self, request: Empty, context) -> fan_pb2.FansId:
         """Get the id of each fan in Reachy."""
+        if self.fans == OrderedDict():
+            return fan_pb2.FansId(names=[], uids=[])
+
         uids, names = zip(*enumerate(self.fans.keys()))
         return fan_pb2.FansId(names=names, uids=uids)
 
