@@ -19,17 +19,16 @@ import grpc
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import Point, Quaternion, Vector3
+from geometry_msgs.msg import Point, Quaternion
 from sensor_msgs.msg import JointState
 
 from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
-from reachy_msgs.srv import GetArmIK, GetArmFK, GetOrbitaIK, GetQuaternionTransform
+from reachy_msgs.srv import GetArmIK, GetArmFK
 from reachy_msgs.srv import SetFanState
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
-from reachy_sdk_api import orbita_kinematics_pb2, orbita_kinematics_pb2_grpc
 from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
@@ -46,7 +45,6 @@ proto_arm_side_to_str = {
 class ReachySDKServer(Node,
                       joint_pb2_grpc.JointServiceServicer,
                       sensor_pb2_grpc.SensorServiceServicer,
-                      orbita_kinematics_pb2_grpc.OrbitaKinematicsServicer,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
@@ -126,13 +124,10 @@ class ReachySDKServer(Node,
         self.left_arm_ik = self.create_client(GetArmIK, '/left_arm/kinematics/inverse')
         self.right_arm_fk = self.create_client(GetArmFK, '/right_arm/kinematics/forward')
         self.right_arm_ik = self.create_client(GetArmIK, '/right_arm/kinematics/inverse')
-        self.orbita_ik = self.create_client(GetOrbitaIK, '/orbita/kinematics/inverse')
-        self.orbita_look_at_tf = self.create_client(GetQuaternionTransform, '/orbita/kinematics/look_vector_to_quaternion')
 
         for cli in [
             self.left_arm_fk, self.left_arm_ik,
             self.right_arm_fk, self.right_arm_ik,
-            self.orbita_ik, self.orbita_look_at_tf,
         ]:
             while not cli.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info(f'service {cli.srv_name} not available, waiting again...')
@@ -352,12 +347,6 @@ class ReachySDKServer(Node,
     def GetAllJointsId(self, request: Empty, context) -> joint_pb2.JointsId:
         """Get all the joints name."""
         uids, names = zip(*enumerate(self.joints.keys()))
-
-        uids, names = zip(*[
-            (uid, name) for (uid, name) in zip(uids, names)
-            if name not in ('neck_roll', 'neck_pitch', 'neck_yaw')
-        ])
-
         return joint_pb2.JointsId(names=names, uids=uids)
 
     def GetJointsState(self, request: joint_pb2.JointsStateRequest, context) -> joint_pb2.JointsState:
@@ -452,47 +441,6 @@ class ReachySDKServer(Node,
             last_pub = time.time()
 
     # Kinematics Service
-    def ComputeOrbitaIK(
-        self,
-        request: orbita_kinematics_pb2.OrbitaIKRequest,
-        context,
-    ) -> orbita_kinematics_pb2.OrbitaIKSolution:
-        """Compute Orbita's disks positions for a requested quaternion."""
-        ros_req = GetOrbitaIK.Request()
-        ros_req.orientation = Quaternion(
-            x=request.q.x,
-            y=request.q.y,
-            z=request.q.z,
-            w=request.q.w,
-        )
-        resp = self.orbita_ik.call(ros_req)
-        if not resp.success:
-            return orbita_kinematics_pb2.OrbitaIKSolution(success=False)
-
-        return orbita_kinematics_pb2.OrbitaIKSolution(
-            success=True,
-            disk_position=kinematics_pb2.JointPosition(
-                ids=[joint_pb2.JointId(uid=self.names2ids[f'neck_{name}']) for name in resp.disk_position.name],
-                positions=resp.disk_position.position,
-            ),
-        )
-
-    def GetQuaternionTransform(self, request: orbita_kinematics_pb2.LookVector, context) -> kinematics_pb2.Quaternion:
-        """Get quaternion from the given look at vector."""
-        ros_req = GetQuaternionTransform.Request()
-        ros_req.look_vector = Vector3(
-            x=request.x,
-            y=request.y,
-            z=request.z,
-        )
-        resp = self.orbita_look_at_tf.call(ros_req)
-        return kinematics_pb2.Quaternion(
-            w=resp.orientation.w,
-            x=resp.orientation.x,
-            y=resp.orientation.y,
-            z=resp.orientation.z,
-        )
-
     def ComputeArmFK(self, request: arm_kinematics_pb2.ArmFKRequest, context) -> arm_kinematics_pb2.ArmFKSolution:
         """Compute forward kinematics for requested arm."""
         fk_client = self.left_arm_fk if request.arm_position.side == arm_kinematics_pb2.ArmSide.LEFT else self.right_arm_fk
@@ -590,15 +538,15 @@ class ReachySDKServer(Node,
                     right_arm_success = False
 
             if request.HasField('neck'):
-                resp = self.ComputeOrbitaIK(request.neck, context)
-                if resp.success:
-                    goal_position.update(dict(zip(
-                        (self._joint_id_to_name(name) for name in resp.disk_position.ids),
-                        resp.disk_position.positions,
-                    )))
-                else:
-                    nonlocal orbita_head_success
-                    orbita_head_success = False
+                q = request.neck.q
+
+                joints = [f'neck_{axis}' for axis in ('roll', 'pitch', 'yaw')]
+                rpy = Rotation.from_quat(q.x, q.y, q.z, q.w).as_euler('xyz')
+
+                goal_position.update({
+                    joint: val
+                    for joint, val in zip(joints, rpy)
+                })
 
             for name, pos in goal_position.items():
                 try:
@@ -695,7 +643,6 @@ def main():
     server = grpc.server(thread_pool=ThreadPoolExecutor(max_workers=10))
     joint_pb2_grpc.add_JointServiceServicer_to_server(sdk_server, server)
     sensor_pb2_grpc.add_SensorServiceServicer_to_server(sdk_server, server)
-    orbita_kinematics_pb2_grpc.add_OrbitaKinematicsServicer_to_server(sdk_server, server)
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
