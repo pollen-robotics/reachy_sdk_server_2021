@@ -18,10 +18,7 @@ def generate_launch_description():
             executable='robot_state_publisher',
             arguments=[urdf],
         ),
-        Node(
-            package='reachy_kinematics',
-            executable='orbita_kinematics_service',
-        ),
+
         Node(
             package='reachy_kinematics',
             executable='arm_kinematics_service',
