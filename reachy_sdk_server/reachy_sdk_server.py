@@ -541,7 +541,7 @@ class ReachySDKServer(Node,
                 q = request.neck.q
 
                 joints = [f'neck_{axis}' for axis in ('roll', 'pitch', 'yaw')]
-                rpy = Rotation.from_quat(q.x, q.y, q.z, q.w).as_euler('xyz')
+                rpy = Rotation.from_quat(q.x, q.y, q.z, q.w).as_euler('XYZ')
 
                 goal_position.update({
                     joint: val
