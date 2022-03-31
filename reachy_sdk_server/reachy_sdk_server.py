@@ -19,11 +19,15 @@ import grpc
 import rclpy
 from rclpy.node import Node
 
+from control_msgs.msg import DynamicJointState, InterfaceValue
 from geometry_msgs.msg import Point, Quaternion
-from sensor_msgs.msg import JointState
+from std_msgs.msg import Float64MultiArray
 
-from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
-from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
+from reachy_msgs.msg import FanState, PidGains
+from reachy_msgs.srv import (
+    GetJointFullState, SetJointCompliancy, SetJointPidGains,
+    SetJointSpeedLimit, SetJointTorqueLimit,
+)
 from reachy_msgs.srv import GetArmIK, GetArmFK
 from reachy_msgs.srv import SetFanState
 
@@ -39,6 +43,22 @@ from .utils import jointstate_pb_from_request
 proto_arm_side_to_str = {
     arm_kinematics_pb2.ArmSide.LEFT: 'left',
     arm_kinematics_pb2.ArmSide.RIGHT: 'right',
+}
+
+# TODO: get that information from the controllers yaml file?
+controllers = {
+    'head': ['neck_roll', 'neck_pitch', 'neck_yaw'],
+    'antenna': ['l_antenna', 'r_antenna'],
+    'l_arm': [
+        'l_shoulder_pitch', 'l_shoulder_roll', 'l_arm_yaw', 'l_elbow_pitch',
+        'l_forearm_yaw', 'l_wrist_pitch', 'l_wrist_roll',
+    ],
+    'l_gripper': ['l_gripper'],
+    'r_arm': [
+        'r_shoulder_pitch', 'r_shoulder_roll', 'r_arm_yaw', 'r_elbow_pitch',
+        'r_forearm_yaw', 'r_wrist_pitch', 'r_wrist_roll',
+    ],
+    'r_gripper': ['r_gripper'],
 }
 
 
@@ -69,6 +89,8 @@ class ReachySDKServer(Node,
         self.joints: Dict[str, Dict[str, float]] = OrderedDict()
         self.force_sensors: Dict[str, float] = OrderedDict()
         self.fans: Dict[str, bool] = OrderedDict()
+
+        self.joint_states_pub_event = threading.Event()
         self.setup()
 
         self.id2names = {i: name for i, name in enumerate(self.joints.keys())}
@@ -80,30 +102,21 @@ class ReachySDKServer(Node,
 
         self.compliant_client = self.create_client(SetJointCompliancy, 'set_joint_compliancy')
         while not self.compliant_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info(f'service {self.compliant_client.srv_name} not available, waiting again...')
+            self.get_logger().info(f'service "{self.compliant_client.srv_name}" not available, waiting again...')
+        self.get_logger().info(f'Client "{self.compliant_client.srv_name}" ready.')
 
         self.set_pid_client = self.create_client(SetJointPidGains, 'set_joint_pid')
         while not self.set_pid_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info(f'service {self.set_pid_client.srv_name} not available, waiting again...')
+            self.get_logger().info(f'service "{self.set_pid_client.srv_name}" not available, waiting again...')
+        self.get_logger().info(f'Client "{self.set_pid_client.srv_name}" ready.')
 
         self.set_fan_client = self.create_client(SetFanState, 'set_fan_state')
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
 
-        self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
-            msg_type=JointState, topic='joint_states',
+            msg_type=DynamicJointState, topic='dynamic_joint_states',
             callback=self.on_joint_states, qos_profile=5,
-        )
-
-        self.joint_temperatures_sub = self.create_subscription(
-            msg_type=JointTemperature, topic='joint_temperatures',
-            callback=self.on_joint_temperatures, qos_profile=5,
-        )
-
-        self.force_sensor_sub = self.create_subscription(
-            msg_type=ForceSensor, topic='force_sensors',
-            callback=self.on_force_sensors, qos_profile=5,
         )
 
         self.fan_states_sub = self.create_subscription(
@@ -111,12 +124,15 @@ class ReachySDKServer(Node,
             callback=self.on_fan_states, qos_profile=5,
         )
 
-        self.joint_goals_pub = self.create_publisher(
-            msg_type=JointState, topic='joint_goals', qos_profile=5,
-        )
+        self.forward_controllers_pubs = {
+            name: self.create_publisher(
+                msg_type=Float64MultiArray,
+                topic=f'/{name}_forward_position_controller/commands',
+                qos_profile=5,
+            )
+            for name in controllers.keys()
+        }
         self.should_publish_position = threading.Event()
-        self.should_publish_velocity = threading.Event()
-        self.should_publish_effort = threading.Event()
         self.create_timer(timer_period_sec=self.pub_period, callback=self.on_joint_goals_publish)
 
         # Kinematics
@@ -146,6 +162,16 @@ class ReachySDKServer(Node,
         else:
             return [pid.compliance.cw_compliance_margin, pid.compliance.ccw_compliance_margin,
                     pid.compliance.cw_compliance_slope, pid.compliance.ccw_compliance_slope]
+
+    def _pid_from_values(self, iv: InterfaceValue) -> List:
+        d = dict(zip(iv.interface_names, iv.values))
+
+        gains = [d['p_gain'], d['i_gain'], d['d_gain']]
+
+        if not np.isnan(d['extra_gain']):
+            gains.append(d['extra_gain'])
+
+        return gains
 
     def setup(self) -> None:
         """Set up the joints values, retrieve all init info using GetJointFullState srv."""
@@ -182,27 +208,43 @@ class ReachySDKServer(Node,
                 'pid': self._repr_ros_pid(full_state_resp.pid_gain[i]),
             }
 
-    def on_joint_states(self, joint_state: JointState) -> None:
+        # Now, we wait for a first dynamic_joint_states to finish the setup
+        done = threading.Event()
+
+        def wrapped_cb(djs):
+            self.on_joint_states(djs)
+            done.set()
+
+        djs_sub = self.create_subscription(
+            msg_type=DynamicJointState, topic='dynamic_joint_states',
+            callback=wrapped_cb, qos_profile=5,
+        )
+        while not done.is_set():
+            self.logger.warning(f'Waiting for "{djs_sub.topic_name}" to be published...')
+            rclpy.spin_once(self)
+
+    def on_joint_states(self, djs: DynamicJointState) -> None:
         """Update joints position/velocity/effort on joint_state msg."""
-        for i, name in enumerate(joint_state.name):
-            if joint_state.position:
-                self.joints[name]['present_position'] = joint_state.position[i]
-            if joint_state.velocity:
-                self.joints[name]['present_speed'] = joint_state.velocity[i]
-            if joint_state.effort:
-                self.joints[name]['present_load'] = joint_state.effort[i]
+        for name, iv in zip(djs.joint_names, djs.interface_values):
+            if 'position' in iv.interface_names:
+                for k, v in zip(iv.interface_names, iv.values):
+                    if k == 'position':
+                        self.joints[name]['present_position'] = v
+                    elif k == 'temperature':
+                        self.joints[name]['present_temperature'] = v
+                    else:
+                        self.logger.warning(f'Unknown joint field {k}!')
+
+                if 'p_gain' in iv.interface_names:
+                    self.joints[name]['pid'] = self._pid_from_values(iv)
+            elif 'force' in iv.interface_names:
+                for k, v in zip(iv.interface_names, iv.values):
+                    if k == 'force':
+                        self.force_sensors[name] = v
+                    else:
+                        self.logger.warning(f'Unknown force sensor field {k}!')
 
         self.joint_states_pub_event.set()
-
-    def on_joint_temperatures(self, joint_temperature: JointTemperature) -> None:
-        """Update joints temperature on joint_temperature msg."""
-        for name, temp in zip(joint_temperature.name, joint_temperature.temperature):
-            self.joints[name]['temperature'] = temp.temperature
-
-    def on_force_sensors(self, force_sensor: ForceSensor) -> None:
-        """Update load sensor value on load_sensor msg."""
-        for name, force in zip(force_sensor.name, force_sensor.force):
-            self.force_sensors[name] = force
 
     def on_fan_states(self, fan_state: FanState) -> None:
         """Update fan state (on or off) on fan_state msg."""
@@ -216,28 +258,15 @@ class ReachySDKServer(Node,
 
         Automatically called at a predefined frequency.
         """
-        if any((
-            self.should_publish_position.is_set(),
-            self.should_publish_velocity.is_set(),
-            self.should_publish_effort.is_set(),
-        )):
-            joint_goals = JointState()
-            joint_goals.header.stamp = self.clock.now().to_msg()
-            joint_goals.name = self.joints.keys()
+        if not self.should_publish_position.is_set():
+            return
 
-            if self.should_publish_position.is_set():
-                joint_goals.position = [j['goal_position'] for j in self.joints.values()]
-                self.should_publish_position.clear()
+        for c, js in controllers.items():
+            data = [self.joints[j]['goal_position'] for j in js]
+            msg = Float64MultiArray(data=data)
+            self.forward_controllers_pubs[c].publish(msg)
 
-            if self.should_publish_velocity.is_set():
-                joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
-                self.should_publish_velocity.clear()
-
-            if self.should_publish_effort.is_set():
-                joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
-                self.should_publish_effort.clear()
-
-            self.joint_goals_pub.publish(joint_goals)
+        self.should_publish_position.clear()
 
     def _joint_id_to_name(self, joint_id: joint_pb2.JointId) -> str:
         if joint_id.HasField('name'):
@@ -318,7 +347,51 @@ class ReachySDKServer(Node,
             else:
                 success = False
 
-        use_goal_pos, use_goal_vel, use_goal_eff = False, False, False
+        speed_limit = {}
+        for cmd in commands:
+            if cmd.HasField('speed_limit'):
+                name = self._joint_id_to_name(cmd.id)
+                speed_limit[name] = cmd.speed_limit.value
+        if speed_limit:
+            request = SetJointSpeedLimit.Request()
+            request.name = names
+            request.speed_limit = values
+
+            # TODO: Should be re-written using asyncio
+            future = self.compliant_client.call_async(request)
+            for _ in range(1000):
+                if future.done():
+                    success = future.result().success
+                    for name, val in zip(names, values):
+                        self.joints[name]['speed_limit'] = val
+                    break
+                time.sleep(0.001)
+            else:
+                success = False
+
+        torque_limit = {}
+        for cmd in commands:
+            if cmd.HasField('torque_limit'):
+                name = self._joint_id_to_name(cmd.id)
+                torque_limit[name] = cmd.torque_limit.value
+        if torque_limit:
+            request = SetJointTorqueLimit.Request()
+            request.name = names
+            request.torque_limit = values
+
+            # TODO: Should be re-written using asyncio
+            future = self.compliant_client.call_async(request)
+            for _ in range(1000):
+                if future.done():
+                    success = future.result().success
+                    for name, val in zip(names, values):
+                        self.joints[name]['torque_limit'] = val
+                    break
+                time.sleep(0.001)
+            else:
+                success = False
+
+        use_goal_pos = False
         for cmd in commands:
             name = self._joint_id_to_name(cmd.id)
 
@@ -326,20 +399,9 @@ class ReachySDKServer(Node,
                 self.joints[name]['goal_position'] = cmd.goal_position.value
                 use_goal_pos = True
 
-            if cmd.HasField('speed_limit'):
-                self.joints[name]['speed_limit'] = cmd.speed_limit.value
-                use_goal_vel = True
-
-            if cmd.HasField('torque_limit'):
-                self.joints[name]['torque_limit'] = cmd.torque_limit.value
-                use_goal_eff = True
-
         if use_goal_pos:
             self.should_publish_position.set()
-        if use_goal_vel:
-            self.should_publish_velocity.set()
-        if use_goal_eff:
-            self.should_publish_effort.set()
+
         return success
 
     # Handle GRPCs
