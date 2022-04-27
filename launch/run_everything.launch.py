@@ -13,11 +13,11 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        Node(
-            package='robot_state_publisher',
-            executable='robot_state_publisher',
-            arguments=[urdf],
-        ),
+        # Node(
+        #     package='robot_state_publisher',
+        #     executable='robot_state_publisher',
+        #     arguments=[urdf],
+        # ),
         Node(
             package='reachy_kinematics',
             executable='arm_kinematics_service',

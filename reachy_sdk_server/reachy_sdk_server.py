@@ -5,6 +5,7 @@ import time
 
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
+from tkinter import LEFT
 from typing import Dict, Iterator, List
 
 import numpy as np
@@ -25,7 +26,7 @@ from sensor_msgs.msg import JointState
 from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK
-from reachy_msgs.srv import SetFanState
+from reachy_msgs.srv import SetFanState, GetGraspPose
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
@@ -33,6 +34,7 @@ from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
+from reachy_sdk_api import automatic_grasping_pb2, automatic_grasping_pb2_grpc
 
 from .utils import jointstate_pb_from_request
 
@@ -48,6 +50,7 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
+                      automatic_grasping_pb2_grpc.AutomaticGraspingCommandServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -89,6 +92,10 @@ class ReachySDKServer(Node,
         self.set_fan_client = self.create_client(SetFanState, 'set_fan_state')
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
+
+        self.get_grasp_pose_client = self.create_client(GetGraspPose, 'grasp_pose_estimation')
+        # while not self.get_grasp_pose_client.wait_for_service(timeout_sec=1.0):
+        #     self.get_logger().info(f'service {self.get_grasp_pose_client.srv_name} not available, waiting again...')
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
@@ -633,6 +640,62 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
+    # Automatic grasping handler
+    def RequestAutomaticGraspingCommand(
+        self,
+        request: automatic_grasping_pb2.AutomaticGraspingCommand,
+        context
+            ) -> automatic_grasping_pb2.AutomaticGraspingCommandAck:
+        """."""
+        if not request.request_autograsping:
+            return automatic_grasping_pb2.AutomaticGraspingCommandAck(success=False)
+
+        self.logger.info('In request.')
+
+        fut = self.get_grasp_pose_client.call_async(GetGraspPose.Request())
+
+        # rclpy.spin_until_future_complete(self, fut, timeout_sec=1.0)
+        for _ in range(1000):
+            if fut.done():
+                res = fut.result()
+                break
+            time.sleep(0.001)
+
+        self.logger.info(f'res: {res}')
+        success = res.success
+        if not success:
+            return automatic_grasping_pb2.AutomaticGraspingCommandAck(success=success)
+
+        goal_position = {}
+
+        fut = self.left_arm_ik.call_async(GetArmIK.Request(pose=res.pose))
+        # rclpy.spin_until_future_complete(self, fut, timeout_sec=1.0)
+        for _ in range(1000):
+            if fut.done():
+                res = fut.result()
+                break
+            time.sleep(0.001)
+        self.logger.info(f'res IK: {res}')
+
+        if res.success:
+            goal_position.update(dict(zip(
+                res.joint_position.name,
+                res.joint_position.position,
+            )))
+            self.logger.info(str(goal_position))
+        else:
+            success = False
+            self.logger.info('Nope')
+
+        for name, pos in goal_position.items():
+            try:
+                self.joints[name]['goal_position'] = pos
+            except KeyError:
+                self.logger.warning(f'Could not set goal position to unknown joint "{name}"')
+        self.should_publish_position.set()
+        self.logger.info('Published goal position.')
+
+        return automatic_grasping_pb2.AutomaticGraspingCommandAck(success=success)
 
 def main():
     """Run the Node and the gRPC server."""
@@ -646,6 +709,7 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
+    automatic_grasping_pb2_grpc.add_AutomaticGraspingCommandServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
