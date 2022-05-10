@@ -29,6 +29,7 @@ from reachy_msgs.srv import SetFanState
 from reachy_msgs.msg import GripperMX28 as GripperMX28Msg
 from reachy_sdk_api.gripperMX28_pb2 import GripperMX28Command, GrippersMX28Command
 from reachy_sdk_api.gripper_pb2 import GripperCommand, GripperId, GrippersAck
+from reachy_sdk_api.gripperMX28_pb2_grpc import GripperMX28ServiceServicer
 
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
@@ -52,6 +53,7 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
+                      GripperMX28ServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -675,6 +677,7 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
+    reachy_sdk_api.gripperMX28_pb2_grpc.add_GripperMX28ServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
