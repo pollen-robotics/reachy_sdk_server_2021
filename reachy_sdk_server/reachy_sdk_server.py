@@ -26,6 +26,10 @@ from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK
 from reachy_msgs.srv import SetFanState
+from reachy_msgs.msg import GripperMX28 as GripperMX28Msg
+from reachy_sdk_api.gripperMX28_pb2 import GripperMX28Command, GrippersMX28Command
+from reachy_sdk_api.gripper_pb2 import GripperCommand, GripperId, GrippersAck
+
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
@@ -113,6 +117,10 @@ class ReachySDKServer(Node,
 
         self.joint_goals_pub = self.create_publisher(
             msg_type=JointState, topic='joint_goals', qos_profile=5,
+        )
+        # GripperMX28 topic
+        self.gripperMX28_goals_publisher = self.create_publisher(
+            msg_type=GripperMX28Msg, topic='grippersMX28', qos_profile=5,
         )
         self.should_publish_position = threading.Event()
         self.should_publish_velocity = threading.Event()
@@ -291,7 +299,7 @@ class ReachySDKServer(Node,
                     p=cmd.pid.pid.p,
                     i=cmd.pid.pid.i,
                     d=cmd.pid.pid.d,
-                    )
+                )
             elif cmd.pid.HasField('compliance'):
                 pid_gain = PidGains(
                     cw_compliance_margin=cmd.pid.compliance.cw_compliance_margin,
@@ -305,7 +313,7 @@ class ReachySDKServer(Node,
             request = SetJointPidGains.Request(
                 name=names_pid,
                 pid_gain=pid_gains,
-                )
+            )
             future = self.set_pid_client.call_async(request)
             # TODO: Should be re-written using asyncio
             for _ in range(1000):
@@ -341,6 +349,19 @@ class ReachySDKServer(Node,
         if use_goal_eff:
             self.should_publish_effort.set()
         return success
+
+    def handle_gripperMX28_command(self, commands: List[GripperMX28Command]):
+        id2name = {
+            GripperId.LEFT: 'l_gripper',
+            GripperId.RIGHT: 'r_gripper',
+        }
+
+        msg = GripperMX28Msg()
+        msg.name = [id2name[cmd.id] for cmd in commands]
+        msg.goal_position = [cmd.goal_position for cmd in commands]
+
+        if msg.name:
+            self.gripperMX28_goals_publisher.publish(msg)
 
     # Handle GRPCs
     # Joint Service
@@ -401,6 +422,14 @@ class ReachySDKServer(Node,
             if not resp:
                 success = False
         return joint_pb2.JointsCommandAck(success=success)
+
+    def SendGripperMX28Commands(self, request: GrippersMX28Command, context) -> GrippersAck:
+        """Handle new received commands for the grippers.
+
+        Does not properly handle the async response success at the moment.
+        """
+        success = self.handle_gripperMX28_command(request.commands)
+        return GrippersAck(success=success)
 
     # Sensor Service
     def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
@@ -623,7 +652,7 @@ class ReachySDKServer(Node,
         ros_request = SetFanState.Request(
             name=self._fan_ids_request_to_str([fc.id for fc in request.commands]),
             state=[fc.on for fc in request.commands],
-            )
+        )
         future = self.set_fan_client.call_async(ros_request)
         # TODO: Should be re-written using asyncio
         for _ in range(1000):
