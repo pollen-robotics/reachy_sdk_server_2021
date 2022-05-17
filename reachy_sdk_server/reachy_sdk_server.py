@@ -260,7 +260,7 @@ class ReachySDKServer(Node,
                 names.append(name)
                 values.append(cmd.compliant.value)
 
-                if not cmd.compliant.value:
+                if not cmd.compliant.value and self.joints[name]['compliant']:
                     # If turning stiff we reset any obsolete goal_position we may have
                     self.joints[name]['goal_position'] = self.joints[name]['present_position']
 
