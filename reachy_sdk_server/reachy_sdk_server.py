@@ -19,7 +19,8 @@ import grpc
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import Point, Quaternion
+from geometry_msgs.msg import Point, Quaternion, Twist
+
 from sensor_msgs.msg import JointState
 
 from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
@@ -33,6 +34,9 @@ from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
+from reachy_sdk_api import mobile_platform_reachy_pb2, mobile_platform_reachy_pb2_grpc
+
+# usage : mobile_platform_reachy_pb2.DirectionVector
 
 from .utils import jointstate_pb_from_request
 
@@ -48,6 +52,8 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
+                      mobile_platform_reachy_pb2_grpc.MobilityServiceServicer,
+                      mobile_platform_reachy_pb2_grpc.MobileBasePresenceServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -122,6 +128,8 @@ class ReachySDKServer(Node,
         self.joint_goals_pub = self.create_publisher(
             msg_type=JointState, topic='joint_goals', qos_profile=5,
         )
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+
         self.should_publish_position = threading.Event()
         self.should_publish_velocity = threading.Event()
         self.should_publish_effort = threading.Event()
@@ -641,6 +649,20 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
+    # new WIP TODO
+    def SendDirection(self, request: mobile_platform_reachy_pb2.TargetDirectionCommand, context) -> mobile_platform_reachy_pb2.TargetDirectionCommandAck:
+        """Send a speed command for the mobile base expressed in SI units """
+        twist = Twist()
+        twist.linear.x = request.direction.x
+        twist.linear.y = request.direction.y
+        twist.linear.z = 0.0
+        twist.angular.x = 0.0
+        twist.angular.y = 0.0
+        twist.angular.z = request.direction.theta
+        self.pub.publish(twist)
+
+        return mobile_platform_reachy_pb2.TargetDirectionCommandAck(success=True)
+
 
 def main():
     """Run the Node and the gRPC server."""
@@ -654,6 +676,8 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
+    mobile_platform_reachy_pb2_grpc.add_MobilityServiceServicer_to_server(sdk_server, server)
+    mobile_platform_reachy_pb2_grpc.add_MobileBasePresenceServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
