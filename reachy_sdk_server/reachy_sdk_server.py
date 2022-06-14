@@ -25,7 +25,7 @@ from sensor_msgs.msg import JointState
 from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK
-from reachy_msgs.srv import SetFanState
+from reachy_msgs.srv import SetFanState, GetReachyModel
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
@@ -89,6 +89,14 @@ class ReachySDKServer(Node,
         self.set_fan_client = self.create_client(SetFanState, 'set_fan_state')
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
+
+        # Fetching reachy model
+        self.get_reachy_model = self.create_client(GetReachyModel, 'get_reachy_model')
+        while not self.get_reachy_model.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'service {self.get_reachy_model.srv_name} not available, waiting again...')
+        reachy_model_response = self.get_reachy_model.call(GetReachyModel.Request())
+        self.reachy_model = reachy_model_response.reachy_model
+        self.zuuu_model = reachy_model_response.zuuu_model
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
@@ -291,7 +299,7 @@ class ReachySDKServer(Node,
                     p=cmd.pid.pid.p,
                     i=cmd.pid.pid.i,
                     d=cmd.pid.pid.d,
-                    )
+                )
             elif cmd.pid.HasField('compliance'):
                 pid_gain = PidGains(
                     cw_compliance_margin=cmd.pid.compliance.cw_compliance_margin,
@@ -305,7 +313,7 @@ class ReachySDKServer(Node,
             request = SetJointPidGains.Request(
                 name=names_pid,
                 pid_gain=pid_gains,
-                )
+            )
             future = self.set_pid_client.call_async(request)
             # TODO: Should be re-written using asyncio
             for _ in range(1000):
@@ -623,7 +631,7 @@ class ReachySDKServer(Node,
         ros_request = SetFanState.Request(
             name=self._fan_ids_request_to_str([fc.id for fc in request.commands]),
             state=[fc.on for fc in request.commands],
-            )
+        )
         future = self.set_fan_client.call_async(ros_request)
         # TODO: Should be re-written using asyncio
         for _ in range(1000):
