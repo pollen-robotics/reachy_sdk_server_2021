@@ -13,6 +13,7 @@ from scipy.spatial.transform import Rotation
 
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf.wrappers_pb2 import BoolValue, FloatValue
 
 import grpc
 
@@ -649,19 +650,22 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
-    # new WIP TODO
-    def SendDirection(self, request: mobile_platform_reachy_pb2.TargetDirectionCommand, context) -> mobile_platform_reachy_pb2.TargetDirectionCommandAck:
-        """Send a speed command for the mobile base expressed in SI units """
-        twist = Twist()
-        twist.linear.x = request.direction.x
-        twist.linear.y = request.direction.y
-        twist.linear.z = 0.0
-        twist.angular.x = 0.0
-        twist.angular.y = 0.0
-        twist.angular.z = request.direction.theta
-        self.pub.publish(twist)
+    def GetMobileBasePresence(
+                            self,
+                            request: Empty,
+                            context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+        presence = False
+        version = '0.0'
 
-        return mobile_platform_reachy_pb2.TargetDirectionCommandAck(success=True)
+        if self.zuuu_model and self.zuuu_model != 'None':
+            presence = True
+            version = float(self.zuuu_model)
+
+        response = mobile_platform_reachy_pb2.MobileBasePresence(
+            presence=BoolValue(value=presence),
+            model_version=FloatValue(value=version),
+        )
+        return response
 
 
 def main():
