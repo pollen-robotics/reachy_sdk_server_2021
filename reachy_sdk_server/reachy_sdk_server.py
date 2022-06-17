@@ -650,10 +650,9 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
-    def GetMobileBasePresence(
-                            self,
-                            request: Empty,
-                            context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+    # Mobile base presence handler
+    def GetMobileBasePresence(self, request: Empty, context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+        """Get if there is a mobile base with Reachy."""
         presence = False
         version = '0.0'
 
