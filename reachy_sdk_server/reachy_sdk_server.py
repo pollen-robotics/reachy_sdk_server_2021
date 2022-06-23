@@ -9,6 +9,8 @@ from typing import Dict, Iterator, List
 
 import numpy as np
 
+from subprocess import check_output
+
 from scipy.spatial.transform import Rotation
 
 from google.protobuf.empty_pb2 import Empty
@@ -45,6 +47,24 @@ proto_arm_side_to_str = {
     arm_kinematics_pb2.ArmSide.LEFT: 'left',
     arm_kinematics_pb2.ArmSide.RIGHT: 'right',
 }
+
+def get_reachy_model() -> str:
+    """Find the configuration file for your robot.
+
+    Refer to following link for details on how the identification is done:
+    https://github.com/pollen-robotics/reachy_pyluos_hal/blob/main/reachy_pyluos_hal/tools/reachy_identify_model.py
+    """
+    model = check_output(['reachy-identify-model']).strip().decode()
+    return model
+
+
+def get_zuuu_model() -> str:
+    """Find the configuration file for your mobile base.
+    Refer to following link for details on how the identification is done:
+    https://github.com/pollen-robotics/reachy_pyluos_hal/blob/main/reachy_pyluos_hal/tools/reachy_identify_model.py
+    """
+    model = check_output(['reachy-identify-zuuu-model']).strip().decode()
+    return model
 
 
 class ReachySDKServer(Node,
@@ -97,13 +117,9 @@ class ReachySDKServer(Node,
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
 
-        # Fetching reachy model
-        self.get_reachy_model = self.create_client(GetReachyModel, 'get_reachy_model')
-        while not self.get_reachy_model.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info(f'service {self.get_reachy_model.srv_name} not available, waiting again...')
-        reachy_model_response = self.get_reachy_model.call(GetReachyModel.Request())
-        self.reachy_model = reachy_model_response.reachy_model
-        self.zuuu_model = reachy_model_response.zuuu_model
+        #  Fetching reachy model
+        self.reachy_model = get_reachy_model()
+        self.zuuu_model = get_zuuu_model()
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
@@ -650,10 +666,9 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
-    def GetMobileBasePresence(
-                            self,
-                            request: Empty,
-                            context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+    # Mobile base presence handler
+    def GetMobileBasePresence(self, request: Empty, context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+        """Get if there is a mobile base with Reachy."""
         presence = False
         version = '0.0'
 
