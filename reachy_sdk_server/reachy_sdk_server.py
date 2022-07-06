@@ -9,8 +9,6 @@ from typing import Dict, Iterator, List
 
 import numpy as np
 
-from subprocess import check_output
-
 from scipy.spatial.transform import Rotation
 
 from google.protobuf.empty_pb2 import Empty
@@ -39,32 +37,12 @@ from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_co
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
 from reachy_sdk_api import mobile_platform_reachy_pb2, mobile_platform_reachy_pb2_grpc
 
-# usage : mobile_platform_reachy_pb2.DirectionVector
-
 from .utils import jointstate_pb_from_request
 
 proto_arm_side_to_str = {
     arm_kinematics_pb2.ArmSide.LEFT: 'left',
     arm_kinematics_pb2.ArmSide.RIGHT: 'right',
 }
-
-def get_reachy_model() -> str:
-    """Find the configuration file for your robot.
-
-    Refer to following link for details on how the identification is done:
-    https://github.com/pollen-robotics/reachy_pyluos_hal/blob/main/reachy_pyluos_hal/tools/reachy_identify_model.py
-    """
-    model = check_output(['reachy-identify-model']).strip().decode()
-    return model
-
-
-def get_zuuu_model() -> str:
-    """Find the configuration file for your mobile base.
-    Refer to following link for details on how the identification is done:
-    https://github.com/pollen-robotics/reachy_pyluos_hal/blob/main/reachy_pyluos_hal/tools/reachy_identify_model.py
-    """
-    model = check_output(['reachy-identify-zuuu-model']).strip().decode()
-    return model
 
 
 class ReachySDKServer(Node,
@@ -117,9 +95,9 @@ class ReachySDKServer(Node,
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
 
-        #  Fetching reachy model
-        self.reachy_model = get_reachy_model()
-        self.zuuu_model = get_zuuu_model()
+        self.get_reachy_model_client = self.create_client(GetReachyModel, 'get_reachy_model')
+        while not self.get_reachy_model_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'service {self.get_reachy_model_client.srv_name} not available, waiting again...')
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
@@ -672,13 +650,24 @@ class ReachySDKServer(Node,
         presence = False
         version = '0.0'
 
-        if self.zuuu_model and self.zuuu_model != 'None':
+        ros_request = GetReachyModel.Request()
+        future = self.get_reachy_model_client.call_async(ros_request)
+        # TODO: Should be re-written using asyncio
+        for _ in range(1000):
+            if future.done():
+                res = future.result()
+                break
+            time.sleep(0.001)
+
+        zuuu_model = res.zuuu_model
+
+        if zuuu_model and zuuu_model != 'None':
             presence = True
-            version = float(self.zuuu_model)
+            version = zuuu_model
 
         response = mobile_platform_reachy_pb2.MobileBasePresence(
             presence=BoolValue(value=presence),
-            model_version=FloatValue(value=version),
+            model_version=FloatValue(value=float(version)),
         )
         return response
 
@@ -695,7 +684,6 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
-    mobile_platform_reachy_pb2_grpc.add_MobilityServiceServicer_to_server(sdk_server, server)
     mobile_platform_reachy_pb2_grpc.add_MobileBasePresenceServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
