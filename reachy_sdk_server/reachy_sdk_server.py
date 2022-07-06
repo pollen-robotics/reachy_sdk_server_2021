@@ -122,7 +122,6 @@ class ReachySDKServer(Node,
         self.joint_goals_pub = self.create_publisher(
             msg_type=JointState, topic='joint_goals', qos_profile=5,
         )
-        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 10)
 
         self.should_publish_position = threading.Event()
         self.should_publish_velocity = threading.Event()
