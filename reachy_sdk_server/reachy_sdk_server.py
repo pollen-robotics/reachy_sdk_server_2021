@@ -51,7 +51,6 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
-                      mobile_platform_reachy_pb2_grpc.MobilityServiceServicer,
                       mobile_platform_reachy_pb2_grpc.MobileBasePresenceServiceServicer,
                       ):
     """Reachy SDK server node."""
