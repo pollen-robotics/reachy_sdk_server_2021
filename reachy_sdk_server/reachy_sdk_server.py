@@ -20,7 +20,7 @@ import grpc
 import rclpy
 from rclpy.node import Node
 
-from geometry_msgs.msg import Point, Quaternion, Twist
+from geometry_msgs.msg import Point, Quaternion
 
 from sensor_msgs.msg import JointState
 
