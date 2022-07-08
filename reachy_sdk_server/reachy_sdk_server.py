@@ -27,7 +27,7 @@ from sensor_msgs.msg import JointState
 from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK
-from reachy_msgs.srv import SetFanState, GetReachyModel
+from reachy_msgs.srv import GetReachyModel, SetFanState
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
