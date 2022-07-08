@@ -13,6 +13,7 @@ from scipy.spatial.transform import Rotation
 
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf.wrappers_pb2 import BoolValue, FloatValue
 
 import grpc
 
@@ -20,12 +21,13 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import Point, Quaternion
+
 from sensor_msgs.msg import JointState
 
 from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK
-from reachy_msgs.srv import SetFanState
+from reachy_msgs.srv import GetReachyModel, SetFanState
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
@@ -33,6 +35,7 @@ from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc
+from reachy_sdk_api import mobile_platform_reachy_pb2, mobile_platform_reachy_pb2_grpc
 
 from .utils import jointstate_pb_from_request
 
@@ -48,6 +51,7 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
+                      mobile_platform_reachy_pb2_grpc.MobileBasePresenceServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -90,6 +94,10 @@ class ReachySDKServer(Node,
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
 
+        self.get_reachy_model_client = self.create_client(GetReachyModel, 'get_reachy_model')
+        while not self.get_reachy_model_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'service {self.get_reachy_model_client.srv_name} not available, waiting again...')
+
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
             msg_type=JointState, topic='joint_states',
@@ -114,6 +122,7 @@ class ReachySDKServer(Node,
         self.joint_goals_pub = self.create_publisher(
             msg_type=JointState, topic='joint_goals', qos_profile=5,
         )
+
         self.should_publish_position = threading.Event()
         self.should_publish_velocity = threading.Event()
         self.should_publish_effort = threading.Event()
@@ -291,7 +300,7 @@ class ReachySDKServer(Node,
                     p=cmd.pid.pid.p,
                     i=cmd.pid.pid.i,
                     d=cmd.pid.pid.d,
-                    )
+                )
             elif cmd.pid.HasField('compliance'):
                 pid_gain = PidGains(
                     cw_compliance_margin=cmd.pid.compliance.cw_compliance_margin,
@@ -305,7 +314,7 @@ class ReachySDKServer(Node,
             request = SetJointPidGains.Request(
                 name=names_pid,
                 pid_gain=pid_gains,
-                )
+            )
             future = self.set_pid_client.call_async(request)
             # TODO: Should be re-written using asyncio
             for _ in range(1000):
@@ -623,7 +632,7 @@ class ReachySDKServer(Node,
         ros_request = SetFanState.Request(
             name=self._fan_ids_request_to_str([fc.id for fc in request.commands]),
             state=[fc.on for fc in request.commands],
-            )
+        )
         future = self.set_fan_client.call_async(ros_request)
         # TODO: Should be re-written using asyncio
         for _ in range(1000):
@@ -632,6 +641,33 @@ class ReachySDKServer(Node,
                 break
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
+
+    # Mobile base presence handler
+    def GetMobileBasePresence(self, request: Empty, context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+        """Get if there is a mobile base with Reachy."""
+        presence = False
+        version = '0.0'
+
+        ros_request = GetReachyModel.Request()
+        future = self.get_reachy_model_client.call_async(ros_request)
+        # TODO: Should be re-written using asyncio
+        for _ in range(1000):
+            if future.done():
+                res = future.result()
+                break
+            time.sleep(0.001)
+
+        zuuu_model = res.zuuu_model
+
+        if zuuu_model and zuuu_model != 'None':
+            presence = True
+            version = zuuu_model
+
+        response = mobile_platform_reachy_pb2.MobileBasePresence(
+            presence=BoolValue(value=presence),
+            model_version=FloatValue(value=float(version)),
+        )
+        return response
 
 
 def main():
@@ -646,6 +682,7 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
+    mobile_platform_reachy_pb2_grpc.add_MobileBasePresenceServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
