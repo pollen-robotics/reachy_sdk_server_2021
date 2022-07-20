@@ -2,6 +2,7 @@
 
 import threading
 import time
+from subprocess import check_output
 
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -643,29 +644,26 @@ class ReachySDKServer(Node,
         return fan_pb2.FansCommandAck(success=success)
 
     # Mobile base presence handler
-    def GetMobileBasePresence(self, request: Empty, context) -> mobile_platform_reachy_pb2.MobileBasePresence:
-        """Get if there is a mobile base with Reachy."""
+    def GetMobileBasePresence(
+                            self,
+                            request: Empty,
+                            context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+        """Return if a mobile base is in Reachy's config file.
+
+        If yes, return the mobile base version.
+        """
         presence = False
         version = '0.0'
 
-        ros_request = GetReachyModel.Request()
-        future = self.get_reachy_model_client.call_async(ros_request)
-        # TODO: Should be re-written using asyncio
-        for _ in range(1000):
-            if future.done():
-                res = future.result()
-                break
-            time.sleep(0.001)
+        model = check_output(['reachy-identify-zuuu-model']).strip().decode()
 
-        zuuu_model = res.zuuu_model
-
-        if zuuu_model and zuuu_model != 'None':
+        if model and model != 'None':
             presence = True
-            version = zuuu_model
+            version = float(model)
 
         response = mobile_platform_reachy_pb2.MobileBasePresence(
             presence=BoolValue(value=presence),
-            model_version=FloatValue(value=float(version)),
+            model_version=FloatValue(value=version),
         )
         return response
 
