@@ -113,6 +113,8 @@ Return the image of the requested Reachy's camera. <br> See [camera_reachy.proto
 
 * **SetZoomSpeed** [[camera_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/camera_server.py)] - Change Reachy's camera zoom to the requested predefined level (either 'in', 'inter, or 'out'). <br> See [zoom_command.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/zoom_command.proto) for more details.
 
+* **GetMobileBasePresence** [[reachy_sdk_server](https://github.com/pollen-robotics/reachy_sdk_server/blob/master/reachy_sdk_server/reachy_sdk_server.py)] - Return if a mobile base is specified in Reachy's configuration file (*~/.reachy.yaml*). If yes, return also the mobile base version. <br> See [mobile_platform_reachy.proto](https://github.com/pollen-robotics/reachy-sdk-api/blob/main/protos/mobile_platform_reachy.proto) for more details.
+
 ## Launch files
 * **reachy_sdk_server.launch.py** - Launch reachy_sdk_server node.
 * **camera_server.launch.py** - Launch camera_server node.
@@ -121,5 +123,4 @@ Return the image of the requested Reachy's camera. <br> See [camera_reachy.proto
 ---
 This package is part of the ROS2-based software release of the version 2021 of Reachy.
 
-Visit [pollen-robotics.com](https://pollen-robotics.com) to learn more or visit [our forum](https://forum.pollen-robotics.com) if you have any questions.
-
+Visit [pollen-robotics.com](https://pollen-robotics.com) to learn more or join our [Dicord community](https://discord.com/invite/Kg3mZHTKgs) if you have any questions or want to share your ideas.

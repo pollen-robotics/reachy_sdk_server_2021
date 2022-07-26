@@ -2,6 +2,7 @@
 
 import threading
 import time
+from subprocess import check_output
 
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +14,7 @@ from scipy.spatial.transform import Rotation
 
 from google.protobuf.empty_pb2 import Empty
 from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf.wrappers_pb2 import BoolValue, FloatValue
 
 import grpc
 
@@ -20,12 +22,13 @@ import rclpy
 from rclpy.node import Node
 
 from geometry_msgs.msg import Point, Quaternion
+
 from sensor_msgs.msg import JointState
 
 from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK
-from reachy_msgs.srv import SetFanState
+from reachy_msgs.srv import GetReachyModel, SetFanState
 from reachy_msgs.msg import GripperMX28 as GripperMX28Msg
 from reachy_sdk_api.gripperMX28_pb2 import GripperMX28Command, GrippersMX28Command
 from reachy_sdk_api.gripper_pb2 import GripperCommand, GripperId, GrippersAck
@@ -37,6 +40,7 @@ from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
 from reachy_sdk_api import fan_pb2, fan_pb2_grpc, gripperMX28_pb2_grpc
+from reachy_sdk_api import mobile_platform_reachy_pb2, mobile_platform_reachy_pb2_grpc
 
 from .utils import jointstate_pb_from_request
 
@@ -53,6 +57,7 @@ class ReachySDKServer(Node,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
                       gripperMX28_pb2_grpc.GripperMX28ServiceServicer,
+                      mobile_platform_reachy_pb2_grpc.MobileBasePresenceServiceServicer,
                       ):
     """Reachy SDK server node."""
 
@@ -94,6 +99,10 @@ class ReachySDKServer(Node,
         self.set_fan_client = self.create_client(SetFanState, 'set_fan_state')
         while not self.set_fan_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info(f'service {self.set_fan_client.srv_name} not available, waiting again...')
+
+        self.get_reachy_model_client = self.create_client(GetReachyModel, 'get_reachy_model')
+        while not self.get_reachy_model_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info(f'service {self.get_reachy_model_client.srv_name} not available, waiting again...')
 
         self.joint_states_pub_event = threading.Event()
         self.joint_states_sub = self.create_subscription(
@@ -269,7 +278,7 @@ class ReachySDKServer(Node,
                 names.append(name)
                 values.append(cmd.compliant.value)
 
-                if not cmd.compliant.value:
+                if not cmd.compliant.value and self.joints[name]['compliant']:
                     # If turning stiff we reset any obsolete goal_position we may have
                     self.joints[name]['goal_position'] = self.joints[name]['present_position']
 
@@ -663,6 +672,30 @@ class ReachySDKServer(Node,
             time.sleep(0.001)
         return fan_pb2.FansCommandAck(success=success)
 
+    # Mobile base presence handler
+    def GetMobileBasePresence(
+                            self,
+                            request: Empty,
+                            context) -> mobile_platform_reachy_pb2.MobileBasePresence:
+        """Return if a mobile base is in Reachy's config file.
+
+        If yes, return the mobile base version.
+        """
+        presence = False
+        version = '0.0'
+
+        model = check_output(['reachy-identify-zuuu-model']).strip().decode()
+
+        if model and model != 'None':
+            presence = True
+            version = float(model)
+
+        response = mobile_platform_reachy_pb2.MobileBasePresence(
+            presence=BoolValue(value=presence),
+            model_version=FloatValue(value=version),
+        )
+        return response
+
 
 def main():
     """Run the Node and the gRPC server."""
@@ -677,6 +710,7 @@ def main():
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
     gripperMX28_pb2_grpc.add_GripperMX28ServiceServicer_to_server(sdk_server, server)
+    mobile_platform_reachy_pb2_grpc.add_MobileBasePresenceServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
     server.start()
