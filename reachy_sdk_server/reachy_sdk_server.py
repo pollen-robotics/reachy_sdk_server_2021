@@ -29,17 +29,14 @@ from reachy_msgs.msg import JointTemperature, ForceSensor, PidGains, FanState
 from reachy_msgs.srv import GetJointFullState, SetJointCompliancy, SetJointPidGains
 from reachy_msgs.srv import GetArmIK, GetArmFK
 from reachy_msgs.srv import GetReachyModel, SetFanState
-from reachy_msgs.msg import GripperMX28 as GripperMX28Msg
-from reachy_sdk_api.gripperMX28_pb2 import GripperMX28Command, GrippersMX28Command
-from reachy_sdk_api.gripper_pb2 import GripperCommand, GripperId, GrippersAck
-
+from reachy_msgs.msg import Gripper as GripperMsg
 
 from reachy_sdk_api import joint_pb2, joint_pb2_grpc
 from reachy_sdk_api import sensor_pb2, sensor_pb2_grpc
 from reachy_sdk_api import kinematics_pb2
 from reachy_sdk_api import arm_kinematics_pb2, arm_kinematics_pb2_grpc
 from reachy_sdk_api import fullbody_cartesian_command_pb2, fullbody_cartesian_command_pb2_grpc
-from reachy_sdk_api import fan_pb2, fan_pb2_grpc, gripperMX28_pb2_grpc
+from reachy_sdk_api import fan_pb2, fan_pb2_grpc
 from reachy_sdk_api import mobile_platform_reachy_pb2, mobile_platform_reachy_pb2_grpc
 
 from .utils import jointstate_pb_from_request
@@ -56,7 +53,6 @@ class ReachySDKServer(Node,
                       arm_kinematics_pb2_grpc.ArmKinematicsServicer,
                       fullbody_cartesian_command_pb2_grpc.FullBodyCartesianCommandServiceServicer,
                       fan_pb2_grpc.FanControllerServiceServicer,
-                      gripperMX28_pb2_grpc.GripperMX28ServiceServicer,
                       mobile_platform_reachy_pb2_grpc.MobileBasePresenceServiceServicer,
                       ):
     """Reachy SDK server node."""
@@ -128,9 +124,9 @@ class ReachySDKServer(Node,
         self.joint_goals_pub = self.create_publisher(
             msg_type=JointState, topic='joint_goals', qos_profile=5,
         )
-        # GripperMX28 topic
-        self.gripperMX28_goals_publisher = self.create_publisher(
-            msg_type=GripperMX28Msg, topic='grippersMX28', qos_profile=5,
+
+        self.grippers_goals_publisher = self.create_publisher(
+            msg_type=GripperMsg, topic='grippers', qos_profile=5,
         )
         self.should_publish_position = threading.Event()
         self.should_publish_velocity = threading.Event()
@@ -337,20 +333,26 @@ class ReachySDKServer(Node,
                 success = False
 
         use_goal_pos, use_goal_vel, use_goal_eff = False, False, False
+        grippers_commands = []
         for cmd in commands:
             name = self._joint_id_to_name(cmd.id)
 
-            if cmd.HasField('goal_position'):
-                self.joints[name]['goal_position'] = cmd.goal_position.value
-                use_goal_pos = True
+            if name.endswith('gripper'):
+                if cmd.HasField('goal_position'):
+                    grippers_commands.append(cmd)
 
-            if cmd.HasField('speed_limit'):
-                self.joints[name]['speed_limit'] = cmd.speed_limit.value
-                use_goal_vel = True
+            else:
+                if cmd.HasField('goal_position'):
+                    self.joints[name]['goal_position'] = cmd.goal_position.value
+                    use_goal_pos = True
 
-            if cmd.HasField('torque_limit'):
-                self.joints[name]['torque_limit'] = cmd.torque_limit.value
-                use_goal_eff = True
+                if cmd.HasField('speed_limit'):
+                    self.joints[name]['speed_limit'] = cmd.speed_limit.value
+                    use_goal_vel = True
+
+                if cmd.HasField('torque_limit'):
+                    self.joints[name]['torque_limit'] = cmd.torque_limit.value
+                    use_goal_eff = True
 
         if use_goal_pos:
             self.should_publish_position.set()
@@ -358,20 +360,17 @@ class ReachySDKServer(Node,
             self.should_publish_velocity.set()
         if use_goal_eff:
             self.should_publish_effort.set()
+        if grippers_commands:
+            self.handle_grippers_command(grippers_commands)
         return success
 
-    def handle_gripperMX28_command(self, commands: List[GripperMX28Command]):
-        id2name = {
-            GripperId.LEFT: 'l_gripper',
-            GripperId.RIGHT: 'r_gripper',
-        }
-
-        msg = GripperMX28Msg()
-        msg.name = [id2name[cmd.id] for cmd in commands]
-        msg.goal_position = [cmd.goal_position for cmd in commands]
+    def handle_grippers_command(self, commands: List[joint_pb2.JointCommand]):
+        msg = GripperMsg()
+        msg.name = [self._joint_id_to_name(cmd.id) for cmd in commands]
+        msg.goal_position = [float(cmd.goal_position.value) for cmd in commands]
 
         if msg.name:
-            self.gripperMX28_goals_publisher.publish(msg)
+            self.grippers_goals_publisher.publish(msg)
 
     # Handle GRPCs
     # Joint Service
@@ -432,14 +431,6 @@ class ReachySDKServer(Node,
             if not resp:
                 success = False
         return joint_pb2.JointsCommandAck(success=success)
-
-    def SendGripperMX28Commands(self, request: GrippersMX28Command, context) -> GrippersAck:
-        """Handle new received commands for the grippers.
-
-        Does not properly handle the async response success at the moment.
-        """
-        success = self.handle_gripperMX28_command(request.commands)
-        return GrippersAck(success=success)
 
     # Sensor Service
     def GetAllForceSensorsId(self, request: Empty, context) -> sensor_pb2.SensorsId:
@@ -709,7 +700,6 @@ def main():
     arm_kinematics_pb2_grpc.add_ArmKinematicsServicer_to_server(sdk_server, server)
     fullbody_cartesian_command_pb2_grpc.add_FullBodyCartesianCommandServiceServicer_to_server(sdk_server, server)
     fan_pb2_grpc.add_FanControllerServiceServicer_to_server(sdk_server, server)
-    gripperMX28_pb2_grpc.add_GripperMX28ServiceServicer_to_server(sdk_server, server)
     mobile_platform_reachy_pb2_grpc.add_MobileBasePresenceServiceServicer_to_server(sdk_server, server)
 
     server.add_insecure_port('[::]:50055')
