@@ -237,18 +237,18 @@ class ReachySDKServer(Node,
         )):
             joint_goals = JointState()
             joint_goals.header.stamp = self.clock.now().to_msg()
-            joint_goals.name = self.joints.keys()
+            joint_goals.name = [j for j in self.joints.keys() if not j.endswith('gripper')]
 
             if self.should_publish_position.is_set():
-                joint_goals.position = [j['goal_position'] for j in self.joints.values()]
+                joint_goals.position = [j['goal_position'] for j in self.joints.values() if not j['name'].endswith('gripper')]
                 self.should_publish_position.clear()
 
             if self.should_publish_velocity.is_set():
-                joint_goals.velocity = [j['speed_limit'] for j in self.joints.values()]
+                joint_goals.velocity = [j['speed_limit'] for j in self.joints.values() if not j['name'].endswith('gripper')]
                 self.should_publish_velocity.clear()
 
             if self.should_publish_effort.is_set():
-                joint_goals.effort = [j['torque_limit'] for j in self.joints.values()]
+                joint_goals.effort = [j['torque_limit'] for j in self.joints.values() if not j['name'].endswith('gripper')]
                 self.should_publish_effort.clear()
 
             self.joint_goals_pub.publish(joint_goals)
