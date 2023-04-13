@@ -53,4 +53,8 @@ def generate_launch_description():
             package='reachy_sdk_server',
             executable='camera_server',
         ),
+        Node(
+            package='reachy_controllers',
+            executable='grippers_controller',
+        ),
     ])
